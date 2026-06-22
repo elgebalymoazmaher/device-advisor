@@ -9,6 +9,8 @@ from identity.base import Identity, IdentitySource
 
 log = logging.getLogger(__name__)
 
+_VALID_PROXY_TYPES = {"http", "socks5"}
+
 SOURCES = [
     ("http", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"),
     ("socks5", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"),
@@ -102,6 +104,8 @@ class ProxySource(IdentitySource):
 def _parse_line_source(proto: str, line: str) -> Identity | None:
     line = line.strip()
     if not line or not RE_PROXY_ENTRY.match(line):
+        return None
+    if proto not in _VALID_PROXY_TYPES:
         return None
     proxy_url = f"{proto}://{line}"
     return Identity(source="proxy", proxy_url=proxy_url, proxy_type=proto)

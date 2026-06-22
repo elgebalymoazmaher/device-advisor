@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 
 from rich.console import Console
@@ -46,6 +47,8 @@ def _load_devices() -> list[dict]:
 
 
 def _spec_file_path(slug: str) -> str:
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", slug):
+        raise ValueError(f"Invalid slug: {slug!r}")
     return os.path.join(SPECS_DIR, f"{slug}.json")
 
 
@@ -86,9 +89,12 @@ def _progress_cell(status: str) -> str:
 def _build_display(
     worker_statuses: dict[int, dict],
 ) -> Table:
-    table = Table(box=None, show_header=False, padding=0)
+    table = Table(box=None, show_header=True, padding=0)
 
-    table.add_column()
+    table.add_column("Worker")
+    table.add_column("Device")
+    table.add_column("Status")
+    table.add_column("Brand")
 
     for wid in sorted(worker_statuses):
         s = worker_statuses[wid]
@@ -97,7 +103,7 @@ def _build_display(
         status = s.get("status", "waiting")
 
         table.add_row(
-            f"  W{wid:02d}  {name:<18s}  {_progress_cell(status):<5s}  {brand}"
+            f"W{wid:02d}", name, _progress_cell(status), brand,
         )
 
     return table
@@ -231,7 +237,6 @@ async def main():
         return 1
 
     pool = IdentityPool([src])
-    pool._target = WORKER_COUNT
     await pool.pre_warm()
 
     client = ProxyAwareClient(pool.controller, timeout=15)

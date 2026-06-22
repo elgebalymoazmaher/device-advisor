@@ -93,9 +93,13 @@ def _progress_cell(status: str, page: int = 0) -> str:
 def _build_display(
     worker_statuses: dict[int, dict],
 ) -> Table:
-    table = Table(box=None, show_header=False, padding=0)
+    table = Table(box=None, show_header=True, padding=0)
 
-    table.add_column()
+    table.add_column("Worker")
+    table.add_column("Brand")
+    table.add_column("Status")
+    table.add_column("Devices")
+    table.add_column("Delay")
 
     for wid in sorted(worker_statuses):
         s = worker_statuses[wid]
@@ -106,7 +110,7 @@ def _build_display(
         delay_str = f'{s.get("delay", 0):.0f}s' if s.get("delay") else "--"
 
         table.add_row(
-            f"  W{wid:02d}  {brand:<15s}  {_progress_cell(status, page):<5s}  {dev_str:>5s}  {delay_str:>4s}"
+            f"W{wid:02d}", brand, _progress_cell(status, page), dev_str, delay_str,
         )
 
     return table
