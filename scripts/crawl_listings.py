@@ -20,7 +20,7 @@ from client.client import ProxyAwareClient
 from extraction.listing import parse_brand_listing, parse_raw_specs
 from identity.pool import IdentityPool
 from identity.proxy import ProxySource
-from settings import WORKER_COUNT
+from settings import WORKER_COUNT, BLOCKED_KEYWORDS
 from settings.logging import setup_logging
 
 setup_logging()
@@ -65,81 +65,48 @@ def _page_from_url(url: str, brand_url: str) -> int:
     return int(m.group(1)) if m else 1
 
 
+def _is_valid_listing_content(html: str) -> bool:
+    if len(html) < 2000:
+        return False
+    if "makers" not in html:
+        return False
+    for kw in BLOCKED_KEYWORDS:
+        if kw in html:
+            return False
+    return True
+
+
+def _progress_cell(status: str, page: int = 0) -> str:
+    if status == "done":
+        label = "done"
+    elif status == "abandoned":
+        label = "aband"
+    elif status == "active" and page:
+        label = f"p{page}"
+    elif status == "active":
+        label = "fetch"
+    else:
+        label = "wait"
+    return label
+
+
 def _build_display(
     worker_statuses: dict[int, dict],
-    total_devices: int,
 ) -> Table:
-    table = Table(
-        show_header=True,
-        header_style="bold",
-        box=None,
-        padding=(0, 1),
-        collapse_padding=True,
-    )
+    table = Table(box=None, show_header=False, padding=0)
 
-    table.add_column("ID", style="dim", width=4, no_wrap=True)
-    table.add_column("Brand", width=15, no_wrap=True)
-    table.add_column("Status", width=10)
-    table.add_column("Devices", justify="right", width=7)
-    table.add_column("Delay", justify="right", width=6)
+    table.add_column()
 
     for wid in sorted(worker_statuses):
         s = worker_statuses[wid]
-        brand = s.get("brand", "")[:15] or "..."
-
-        status = s.get("status", "starting")
-        if status == "active" and s.get("page", 0) > 1:
-            display_status = f"p{s['page']}"
-        elif status == "active":
-            display_status = "active"
-        elif status == "done":
-            display_status = "done"
-        elif status == "abandoned":
-            display_status = "abandoned"
-        else:
-            display_status = "waiting"
-
-        status_style = {
-            "active": "green",
-            "done": "cyan",
-            "abandoned": "red",
-            "waiting": "yellow",
-            "starting": "dim",
-        }.get(status, "")
-
-        if status == "active":
-            dev = s.get("devices_current", 0)
-            delay = s.get("delay", 0)
-            dev_str = str(dev) if dev else "--"
-            delay_str = f"{delay:.0f}s" if delay else "--"
-        elif status == "done":
-            dev = s.get("devices_total", 0)
-            dev_str = str(dev)
-            delay_str = "--"
-        elif status == "abandoned":
-            dev = s.get("devices_current", 0)
-            dev_str = str(dev) if dev else "--"
-            delay_str = "--"
-        else:
-            dev_str = "--"
-            delay_str = "--"
+        brand = s.get("brand", "")[:15] or "waiting..."
+        status = s.get("status", "waiting")
+        page = s.get("page", 0) or 0
+        dev_str = str(s.get("devices_current", s.get("devices_total", ""))) or "--"
+        delay_str = f'{s.get("delay", 0):.0f}s' if s.get("delay") else "--"
 
         table.add_row(
-            f"W{wid:02d}",
-            brand,
-            f"[{status_style}]{display_status}[/{status_style}]",
-            dev_str,
-            delay_str,
-        )
-
-    if total_devices:
-        table.add_section()
-        table.add_row(
-            "",
-            "[bold]Total[/bold]",
-            "",
-            f"[bold]{total_devices}[/bold]",
-            "",
+            f"  W{wid:02d}  {brand:<15s}  {_progress_cell(status, page):<5s}  {dev_str:>5s}  {delay_str:>4s}"
         )
 
     return table
@@ -243,6 +210,14 @@ async def _worker(
                 log.debug(
                     "Worker %d: HTTP %d for %s — retrying with new proxy",
                     worker_id, resp.status_code, listing_url,
+                )
+                continue
+
+            if not _is_valid_listing_content(resp.text):
+                await pool.exclude(idn)
+                log.debug(
+                    "Worker %d: HTTP 200 but invalid content for %s — retrying",
+                    worker_id, listing_url,
                 )
                 continue
 
@@ -350,7 +325,7 @@ async def main():
     try:
         while True:
             await asyncio.sleep(0.5)
-            live.update(_build_display(worker_statuses, stats["total_devices"]))
+            live.update(_build_display(worker_statuses))
 
             alive = sum(1 for w in workers if not w.done())
             if alive == 0:

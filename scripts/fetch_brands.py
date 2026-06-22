@@ -12,6 +12,7 @@ from extraction.index import parse_brand_index
 from client.client import ProxyAwareClient
 from identity.pool import IdentityPool
 from identity.proxy import ProxySource
+from settings import BLOCKED_KEYWORDS
 from settings.logging import setup_logging
 
 setup_logging()
@@ -67,6 +68,14 @@ async def main():
 
             if resp.status_code != 200:
                 log.info("Attempt %d: HTTP %d — excluding", attempts, resp.status_code)
+                await pool.exclude(idn)
+                resp = None
+                continue
+
+            if (len(resp.text) < 2000
+                or "st-text" not in resp.text
+                or any(kw in resp.text for kw in BLOCKED_KEYWORDS)):
+                log.info("Attempt %d: HTTP 200 but invalid/blocked content — excluding", attempts)
                 await pool.exclude(idn)
                 resp = None
                 continue

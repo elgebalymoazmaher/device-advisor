@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 
 RE_DEVICES = re.compile(r"(\d+)\s*devices")
 
-GSMArenaURL = "https://www.gsmarena.com/"
+GSMA_URL = "https://www.gsmarena.com/"
 
 
 def parse_brand_index(html: str) -> list[dict]:
@@ -29,7 +29,7 @@ def parse_brand_index(html: str) -> list[dict]:
                 device_count = int(m.group(1))
         rows.append({
             "name": brand_name,
-            "url": GSMArenaURL + href,
+            "url": GSMA_URL + href,
             "slug": href.replace(".php", ""),
             "device_count": device_count,
         })

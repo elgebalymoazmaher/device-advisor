@@ -35,11 +35,10 @@ class ProxyAwareClient:
                 "Direct IP request blocked: identity has no proxy_url. "
                 "All HTTP traffic must go through the proxy pool."
             )
-        else:
-            client = httpx.AsyncClient(
-                proxy=proxy_url,
-                timeout=httpx.Timeout(timeout),
-            )
+        client = httpx.AsyncClient(
+            proxy=proxy_url,
+            timeout=httpx.Timeout(timeout),
+        )
         try:
             async with client:
                 resp = await client.get(url, **kwargs)
