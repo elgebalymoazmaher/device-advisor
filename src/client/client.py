@@ -42,7 +42,7 @@ class ProxyAwareClient:
             )
         try:
             async with client:
-                resp = await client.get(url)
+                resp = await client.get(url, **kwargs)
         except httpx.HTTPError as exc:
             log.debug("Request failed via %s for %s: %s", _redact(identity.proxy_url), url, exc)
             return None

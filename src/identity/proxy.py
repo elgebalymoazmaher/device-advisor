@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 SOURCES = [
     ("http", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"),
     ("socks5", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"),
-    ("socks5", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt"),
+    ("socks4", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt"),
     ("http", "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all"),
     ("socks5", "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks5&timeout=10000&country=all"),
     ("json", "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.json"),
@@ -65,8 +65,11 @@ class ProxySource(IdentitySource):
                     if r.status_code != 200:
                         continue
                     if source_type == "json":
+                        data = r.json()
+                        if isinstance(data, dict):
+                            data = data.get("data", data)
                         candidates.extend(
-                            _parse_json_source(node) for node in r.json()
+                            _parse_json_source(node) for node in data
                         )
                     else:
                         candidates.extend(

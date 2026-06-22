@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import time
+from urllib.parse import urlparse
 
 from identity.base import Identity, IdentitySource
 from throttle.aimd import Controller
@@ -54,7 +55,9 @@ class IdentityPool:
     async def exclude(self, identity: Identity):
         async with self._lock:
             self._excluded[identity.proxy_url] = time.monotonic()
-        log.debug("Excluded identity %s", identity.proxy_url)
+        parsed = urlparse(identity.proxy_url)
+        redacted = f"{parsed.scheme}://{parsed.hostname}:{parsed.port}" if parsed.password else identity.proxy_url
+        log.debug("Excluded identity %s", redacted)
 
     async def start_replenisher(self):
         while not self._stop:

@@ -213,6 +213,7 @@ async def _worker(
                     "checkpoint_url": listing_url,
                     "devices": devices,
                 })
+                await asyncio.sleep(5)
                 await queue.put(brand)
                 worker_statuses[worker_id] = {
                     "brand": brand_name,
@@ -240,19 +241,20 @@ async def _worker(
             if resp.status_code != 200:
                 await pool.exclude(idn)
                 log.debug(
-                    "Worker %d: HTTP %d for %s — skipping",
+                    "Worker %d: HTTP %d for %s — retrying with new proxy",
                     worker_id, resp.status_code, listing_url,
                 )
-                listing_url = None
                 continue
 
             await pool.release(idn)
 
             parsed_devices, next_url = parse_brand_listing(resp.text)
 
+            n = 0
             for d in parsed_devices:
                 if _device_in_list(d.url, devices):
                     continue
+                n += 1
                 raw_specs = parse_raw_specs(d.raw_title)
                 devices.append({
                     "brand": brand_name,
@@ -273,7 +275,6 @@ async def _worker(
                 "devices": devices,
             })
 
-            n = len([d for d in parsed_devices if not _device_in_list(d.url, devices)])
             stats["total_devices"] += n
             stats["new_devices"] += n
 
@@ -351,12 +352,11 @@ async def main():
             await asyncio.sleep(0.5)
             live.update(_build_display(worker_statuses, stats["total_devices"]))
 
-            if queue.empty():
-                alive = sum(1 for w in workers if not w.done())
-                if alive == 0:
-                    break
-                if stats["brands_completed"] == len(brands):
-                    break
+            alive = sum(1 for w in workers if not w.done())
+            if alive == 0:
+                break
+            if stats["brands_completed"] == len(brands):
+                break
     finally:
         live.stop()
 

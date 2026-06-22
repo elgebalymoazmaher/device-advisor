@@ -11,7 +11,7 @@ import sys
 import time
 
 import httpx
-from tqdm import tqdm
+from rich.progress import Progress
 
 from identity.proxy import ProxySource
 
@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 OUT_PATH = os.path.join(os.getcwd(), "data", "validated_proxies.json")
 TIMEOUT = 3.0
 CONCURRENT = 200
-TEST_URL = "http://httpbin.org/ip"
+TEST_URL = "https://httpbin.org/ip"
 
 
 async def test_proxy(proxy_url: str) -> float | None:
@@ -71,10 +71,13 @@ async def main():
 
     tasks = [bounded_test(c) for c in unique]
     results: list[dict] = []
-    for coro in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Testing", unit="proxy"):
-        result = await coro
-        if result:
-            results.append(result)
+    with Progress() as progress:
+        task = progress.add_task("Testing", total=len(tasks))
+        for coro in asyncio.as_completed(tasks):
+            result = await coro
+            if result:
+                results.append(result)
+            progress.advance(task)
 
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
