@@ -1,9 +1,11 @@
 __pycache__/
 *.pyc
 *.egg-info/
+*.db
 .ruff_cache/
-/data/tor/
+.pytest_cache/
 .env
 .env.local
 .vscode/
 .idea/
+data/
