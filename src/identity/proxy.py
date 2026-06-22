@@ -12,6 +12,11 @@ log = logging.getLogger(__name__)
 SOURCES = [
     ("http", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"),
     ("socks5", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"),
+    ("socks4", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt"),
+    ("http", "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all"),
+    ("socks5", "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks5&timeout=10000&country=all"),
+    ("json", "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.json"),
+    ("json", "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc"),
 ]
 
 _OCTET = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)"
@@ -50,26 +55,31 @@ class ProxySource(IdentitySource):
         candidates = await self._fetch_all()
         if candidates:
             self._queue.extend(candidates)
-            log.info("Proxy refill: %d candidates queued", len(candidates))
 
     async def _fetch_all(self) -> list[Identity]:
         candidates: list[Identity] = []
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
-            for proto, url in SOURCES:
+            for source_type, url in SOURCES:
                 try:
                     r = await client.get(url)
                     if r.status_code != 200:
                         continue
-                    for line in r.text.strip().splitlines():
-                        line = line.strip()
-                        if not line or not RE_PROXY_ENTRY.match(line):
-                            continue
-                        proxy_url = f"{proto}://{line}"
-                        candidates.append(
-                            Identity(source="proxy", proxy_url=proxy_url, proxy_type=proto)
+                    if source_type == "json":
+                        data = r.json()
+                        if isinstance(data, dict):
+                            data = data.get("data", data)
+                        candidates.extend(
+                            _parse_json_source(node) for node in data
+                        )
+                    else:
+                        candidates.extend(
+                            _parse_line_source(source_type, line)
+                            for line in r.text.strip().splitlines()
                         )
                 except Exception as exc:
-                    log.warning("Proxy source fetch failed: %s — %s", url, exc)
+                    log.debug("Proxy source fetch failed: %s — %s", url, exc)
+        candidates = [c for c in candidates if c is not None]
+        log.debug("Fetched %d raw proxy candidates", len(candidates))
         return candidates
 
     async def _warm_pool(self):
@@ -80,10 +90,36 @@ class ProxySource(IdentitySource):
             if not self._queue:
                 log.warning("Proxy source started with empty pool")
             else:
-                log.info("Proxy source ready (%d candidates)", len(self._queue))
+                log.debug("Proxy source ready (%d raw candidates)", len(self._queue))
 
     @classmethod
     async def probe(cls) -> "ProxySource | None":
         source = cls()
         await source._warm_pool()
         return source
+
+
+def _parse_line_source(proto: str, line: str) -> Identity | None:
+    line = line.strip()
+    if not line or not RE_PROXY_ENTRY.match(line):
+        return None
+    proxy_url = f"{proto}://{line}"
+    return Identity(source="proxy", proxy_url=proxy_url, proxy_type=proto)
+
+
+def _parse_json_source(node) -> Identity | None:
+    ip = node.get("ip") or node.get("ipAddress") or ""
+    port = node.get("port") or node.get("portNumber") or ""
+    protocols = node.get("protocols") or node.get("type") or ["http"]
+    if not ip or not port:
+        return None
+    if isinstance(protocols, list):
+        proto = "socks5" if "socks5" in protocols else "http"
+    else:
+        proto = protocols.split(",")[0].strip().lower()
+        if proto == "socks5":
+            proto = "socks5"
+        else:
+            proto = "http"
+    proxy_url = f"{proto}://{ip}:{port}"
+    return Identity(source="proxy", proxy_url=proxy_url, proxy_type=proto)

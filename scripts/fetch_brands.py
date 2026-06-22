@@ -1,6 +1,5 @@
 """
 Fetch GSMArena brand index through the identity pool, parse, persist.
-Continuously rotates identities (Tor + proxy) until one succeeds.
 Never uses direct IP — fails hard if no identity source works.
 """
 
@@ -12,30 +11,21 @@ import os
 from extraction.index import parse_brand_index
 from client.client import ProxyAwareClient
 from identity.pool import IdentityPool
-from identity.tor import TorSource
 from identity.proxy import ProxySource
+from settings.logging import setup_logging
 
-logging.basicConfig(
-    level=logging.INFO, format="%(levelname)s | %(message)s", force=True
-)
+setup_logging()
 log = logging.getLogger(__name__)
 
 GSM_URL = "https://www.gsmarena.com/makers.php3"
 
 
 async def main():
-    sources = []
-    for probe_fn in (TorSource.probe, ProxySource.probe):
-        src = await probe_fn()
-        if src is not None:
-            sources.append(src)
-            log.info("%s available", type(src).__name__)
-
-    if not sources:
+    src = await ProxySource.probe()
+    if src is None:
         log.error("No identity source available — cannot fetch")
         return
-
-    pool = IdentityPool(sources)
+    pool = IdentityPool([src])
     await pool.pre_warm()
 
     replenisher = asyncio.create_task(pool.start_replenisher())
@@ -59,8 +49,8 @@ async def main():
                 await asyncio.sleep(delay)
 
             log.info(
-                "Attempt %d: fetching via %s %s ...",
-                attempts, idn.source, idn.proxy_url,
+                "Attempt %d: fetching via %s ...",
+                attempts, idn.source,
             )
             resp = await client.fetch(idn, GSM_URL)
 
@@ -92,7 +82,7 @@ async def main():
 
     out_path = os.path.join(
         os.getenv("DATA_DIR", os.path.join(os.getcwd(), "data")),
-        "brands.json",
+        "brand_index.json",
     )
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:

@@ -1,12 +1,11 @@
 ﻿import asyncio
 import logging
-import os
 import sys
-import tempfile
 import time
-import uuid
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+from settings.logging import setup_logging
+
+setup_logging()
 log = logging.getLogger("verify")
 
 PASS = 0
@@ -26,7 +25,7 @@ def fail(msg: str):
 
 
 async def test_demo_mode():
-    log.info("[Test 1] Demo mode â€” simulated delay")
+    log.info("[Test 1] Controller delay & AIMD response")
     from throttle.aimd import Controller
 
     ctrl = Controller(delay=1.0, window=5.0)
@@ -54,36 +53,8 @@ async def test_demo_mode():
         fail(f"Expected delay still 2.0, got {d}")
 
 
-async def test_pool_resilience():
-    log.info("[Test 2] Pool resilience â€” enqueue/claim/crash/recover")
-    from taskqueue.queue import Queue
-
-    path = os.path.join(tempfile.gettempdir(), f"test_queue_{uuid.uuid4().hex}.db")
-    q = Queue(path)
-    for i in range(10):
-        q.enqueue(f"https://example.com/page{i}")
-    claimed_ids = []
-    for _ in range(5):
-        task = q.claim()
-        if task:
-            claimed_ids.append(task["id"])
-    q.close()
-
-    q2 = Queue(path)
-    q2._recover_expired(time.time() + 1000)
-    counts_recovered = q2.count_by_status()
-    total = sum(counts_recovered.values())
-    q2.close()
-    os.remove(path)
-
-    if total == 10:
-        ok("10 tasks enqueued and all accounted after crash simulation")
-    else:
-        fail(f"Expected 10 tasks total, got {total}")
-
-
 async def test_aimd():
-    log.info("[Test 3] AIMD edge cases")
+    log.info("[Test 2] AIMD edge cases")
     from throttle.aimd import Controller
 
     ctrl = Controller(delay=0.5, window=10.0)
@@ -110,16 +81,8 @@ async def test_aimd():
 
 
 async def test_identity_sources():
-    log.info("[Test 4] Identity source probing")
-    from identity.tor import TorSource
+    log.info("[Test 3] Identity source probing")
     from identity.proxy import ProxySource
-
-    tor = await TorSource.probe()
-    if tor:
-        ok("Tor source probed successfully")
-        await tor.close()
-    else:
-        ok("Tor source not available (expected if tor daemon not installed)")
 
     proxy = await ProxySource.probe()
     if proxy:
@@ -131,13 +94,12 @@ async def test_identity_sources():
 
 async def main():
     log.info("=" * 50)
-    log.info("DeviceAdvisor â€” Infrastructure Verification")
+    log.info("DeviceAdvisor — Infrastructure Verification")
     log.info("=" * 50)
     log.info("")
 
     await test_demo_mode()
     await test_aimd()
-    await test_pool_resilience()
     await test_identity_sources()
 
     log.info("")

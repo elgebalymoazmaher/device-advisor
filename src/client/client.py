@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 from urllib.parse import urlparse
 
@@ -29,27 +27,34 @@ class ProxyAwareClient:
     async def fetch(
         self, identity: Identity, url: str, **kwargs
     ) -> httpx.Response | None:
-        if not identity.proxy_url:
+        proxy_url = identity.proxy_url
+        timeout = self._timeout if "timeout" not in kwargs else kwargs.pop("timeout")
+
+        if not proxy_url:
             raise RuntimeError(
                 "Direct IP request blocked: identity has no proxy_url. "
                 "All HTTP traffic must go through the proxy pool."
             )
-        timeout = kwargs.pop("timeout", self._timeout)
-        try:
-            async with httpx.AsyncClient(
-                proxy=identity.proxy_url,
+        else:
+            client = httpx.AsyncClient(
+                proxy=proxy_url,
                 timeout=httpx.Timeout(timeout),
-            ) as client:
-                resp = await client.get(url)
+            )
+        try:
+            async with client:
+                resp = await client.get(url, **kwargs)
         except httpx.HTTPError as exc:
             log.debug("Request failed via %s for %s: %s", _redact(identity.proxy_url), url, exc)
+            return None
+        except Exception as exc:
+            log.debug("Request failed via %s for %s: %s (%s)", _redact(identity.proxy_url), url, exc, type(exc).__name__)
             return None
 
         if resp.status_code == 429:
             await self._controller.report_429()
             log.warning("429 via %s for %s", _redact(identity.proxy_url), url)
         elif resp.is_error:
-            log.warning("%d via %s for %s", resp.status_code, _redact(identity.proxy_url), url)
+            log.debug("HTTP %d via %s for %s", resp.status_code, _redact(identity.proxy_url), url)
         else:
             await self._controller.report_success()
 

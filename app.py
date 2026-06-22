@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import gradio as gr
 
 
@@ -8,4 +6,4 @@ def recommend(message: str, history: list[dict]) -> str:
 
 
 if __name__ == "__main__":
-    gr.ChatInterface(recommend, title="DeviceAdvisor").launch()
+    gr.ChatInterface(recommend).launch()

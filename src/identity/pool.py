@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import time
+from urllib.parse import urlparse
 
 from identity.base import Identity, IdentitySource
 from throttle.aimd import Controller
@@ -36,7 +37,7 @@ class IdentityPool:
                     self._pool.append(identity)
             else:
                 break
-        log.info("Pool pre-warmed: %d/%d identities", len(self._pool), self._target)
+        log.debug("Pool pre-warmed: %d/%d identities", len(self._pool), self._target)
 
     async def acquire(self) -> Identity | None:
         async with self._lock:
@@ -54,7 +55,9 @@ class IdentityPool:
     async def exclude(self, identity: Identity):
         async with self._lock:
             self._excluded[identity.proxy_url] = time.monotonic()
-        log.info("Excluded identity %s", identity.proxy_url)
+        parsed = urlparse(identity.proxy_url)
+        redacted = f"{parsed.scheme}://{parsed.hostname}:{parsed.port}" if parsed.password else identity.proxy_url
+        log.debug("Excluded identity %s", redacted)
 
     async def start_replenisher(self):
         while not self._stop:
@@ -89,7 +92,7 @@ class IdentityPool:
         for url in expired:
             del self._excluded[url]
         if expired:
-            log.info("Pruned %d expired exclusions", len(expired))
+            log.debug("Pruned %d expired exclusions", len(expired))
 
     async def close(self):
         self._stop = True
