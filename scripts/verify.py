@@ -3,6 +3,8 @@ import logging
 import sys
 import time
 
+from throttle.aimd import Controller
+from identity.proxy import ProxySource
 from settings.logging import setup_logging
 
 setup_logging()
@@ -26,7 +28,6 @@ def fail(msg: str):
 
 async def test_demo_mode():
     log.info("[Test 1] Controller delay & AIMD response")
-    from throttle.aimd import Controller
 
     ctrl = Controller(delay=1.0, window=5.0)
 
@@ -55,7 +56,6 @@ async def test_demo_mode():
 
 async def test_aimd():
     log.info("[Test 2] AIMD edge cases")
-    from throttle.aimd import Controller
 
     ctrl = Controller(delay=0.5, window=10.0)
 
@@ -82,7 +82,6 @@ async def test_aimd():
 
 async def test_identity_sources():
     log.info("[Test 3] Identity source probing")
-    from identity.proxy import ProxySource
 
     proxy = await ProxySource.probe()
     if proxy:

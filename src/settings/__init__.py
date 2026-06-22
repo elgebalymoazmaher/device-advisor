@@ -2,6 +2,14 @@
 import platform
 import ctypes
 
+BLOCKED_KEYWORDS = [
+    "Just a moment...",
+    "cf-browser-verification",
+    "Checking your browser",
+    "DDoS protection",
+    "Attention Required",
+]
+
 
 def _available_ram_mb():
     try:

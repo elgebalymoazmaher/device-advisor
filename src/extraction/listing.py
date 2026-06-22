@@ -4,9 +4,7 @@ from bs4 import BeautifulSoup
 
 from models.device import DeviceListing
 
-GSMArenaURL = "https://www.gsmarena.com/"
-
-RE_DEVICE_ID = re.compile(r"-(\d+)\.php$")
+GSMA_URL = "https://www.gsmarena.com/"
 
 RE_ANNOUNCED = re.compile(r"Announced ([^.]+)\.")
 RE_DISPLAY_SIZE = re.compile(r"Features ([\d.]+)[\"″]")
@@ -30,7 +28,12 @@ def _extract_device_type(raw_title: str) -> str | None:
     return None
 
 
-def _extract_raw_specs(raw_title: str) -> dict[str, str | None]:
+def _extract(pattern: re.Pattern, text: str) -> str | None:
+    m = pattern.search(text)
+    return m.group(1) if m else None
+
+
+def parse_raw_specs(raw_title: str) -> dict[str, str | None]:
     return {
         "device_type": _extract_device_type(raw_title),
         "announced_raw": _extract(RE_ANNOUNCED, raw_title),
@@ -40,11 +43,6 @@ def _extract_raw_specs(raw_title: str) -> dict[str, str | None]:
         "storage_gb": _extract(RE_STORAGE, raw_title),
         "ram_gb": _extract(RE_RAM, raw_title),
     }
-
-
-def _extract(pattern: re.Pattern, text: str) -> str | None:
-    m = pattern.search(text)
-    return m.group(1) if m else None
 
 
 def parse_brand_listing(html: str) -> tuple[list[DeviceListing], str | None]:
@@ -67,11 +65,8 @@ def parse_brand_listing(html: str) -> tuple[list[DeviceListing], str | None]:
         if not href or not href.endswith(".php"):
             continue
 
-        device_url = GSMArenaURL + href
+        device_url = GSMA_URL + href
         slug = href.replace(".php", "")
-
-        m = RE_DEVICE_ID.search(href)
-        device_id = m.group(1) if m else slug
 
         img = a.find("img")
         image_url = img.get("src", "").strip() if img else ""
@@ -109,9 +104,5 @@ def _next_page_url(soup: BeautifulSoup) -> str | None:
     if next_link:
         href = next_link.get("href", "")
         if href and href != "#":
-            return GSMArenaURL + href
+            return GSMA_URL + href
     return None
-
-
-def parse_raw_specs(raw_title: str) -> dict[str, str | None]:
-    return _extract_raw_specs(raw_title)
