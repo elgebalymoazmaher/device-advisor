@@ -1,11 +1,18 @@
+# Byte code / caches
 __pycache__/
-*.pyc
-*.egg-info/
-*.db
-.ruff_cache/
-.pytest_cache/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Env vars (copy .env.example to .env, never commit the real one)
 .env
-.env.local
+
+# Scraped/working data — this is output, not source
+data/
+
+# Editor/OS noise
 .vscode/
 .idea/
-data/
+.DS_Store
