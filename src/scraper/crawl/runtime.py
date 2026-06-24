@@ -1,4 +1,4 @@
-"""Shared setup/teardown for a crawl run, plus the response gatekeeping every command uses: did this request succeed, and is the identity that made it still trustworthy?"""
+"""Shared setup/teardown for a crawl run, plus the response gatekeeping every command uses: either the response is good (release the identity), or it's not (permanently exclude the proxy — swap it for a fresh one)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from src.scraper.identity.models import Identity
 from src.scraper.identity.pool import IdentityPool
 from src.scraper.identity.proxy_source import ProxySource
 from src.scraper.net.client import ProxyAwareClient
+from src.scraper.net.throttle import Controller
 from src.shared.settings import DEFAULT_TIMEOUT
 
 log = logging.getLogger(__name__)
@@ -30,7 +31,8 @@ BLOCKED_KEYWORDS = [
 
 async def setup_pool() -> tuple[IdentityPool, ProxyAwareClient]:
     pool = IdentityPool()
-    client = ProxyAwareClient(controller=pool.controller, timeout=DEFAULT_TIMEOUT)
+    controller = Controller()
+    client = ProxyAwareClient(controller=controller, timeout=DEFAULT_TIMEOUT)
     pool.set_client_evict(client.evict)
 
     source = await ProxySource.probe()
@@ -52,33 +54,17 @@ async def handle_response(
     response: httpx.Response | None,
     url: str,
 ) -> bool:
-    if response is None:
-        log.warning("Transport error for %s; excluding identity temporarily", url)
-        await pool.exclude(identity)
-        return False
+    if (
+        response is not None
+        and response.status_code == 200
+        and is_valid_content(response.text)
+        and _RE_PHONE_LINK.search(response.text)
+    ):
+        await pool.release(identity)
+        return True
 
-    if response.status_code == 429:
-        log.warning("429 for %s; excluding identity temporarily", url)
-        await pool.exclude(identity)
-        return False
-
-    if response.is_error:
-        log.warning("HTTP %d for %s; excluding identity temporarily", response.status_code, url)
-        await pool.exclude(identity)
-        return False
-
-    if not is_valid_content(response.text):
-        log.warning("Invalid content for %s; permanently excluding identity", url)
-        await pool.exclude_permanent(identity)
-        return False
-
-    if not _RE_PHONE_LINK.search(response.text):
-        log.warning("No phone links in %s; permanently excluding identity", url)
-        await pool.exclude_permanent(identity)
-        return False
-
-    await pool.release(identity)
-    return True
+    await pool.exclude_permanent(identity)
+    return False
 
 
 def is_valid_content(text: str) -> bool:
