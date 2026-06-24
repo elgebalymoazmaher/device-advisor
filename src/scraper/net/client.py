@@ -50,8 +50,9 @@ class ProxyAwareClient:
                 "All HTTP traffic must go through the proxy pool."
             )
 
-        kwargs.setdefault("headers", {})
-        kwargs["headers"].setdefault("User-Agent", random_user_agent())
+        headers = kwargs.pop("headers", None) or {}
+        headers.setdefault("User-Agent", random_user_agent())
+        kwargs["headers"] = headers
 
         try:
             client = await self._get_client(proxy_url, timeout)

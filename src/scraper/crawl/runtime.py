@@ -58,8 +58,8 @@ async def handle_response(
         return False
 
     if response.status_code == 429:
-        log.warning("429 for %s; permanently excluding identity", url)
-        await pool.exclude_permanent(identity)
+        log.warning("429 for %s; excluding identity temporarily", url)
+        await pool.exclude(identity)
         return False
 
     if response.is_error:

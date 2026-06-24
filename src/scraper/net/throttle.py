@@ -37,10 +37,11 @@ class Controller:
             now = time.monotonic()
             elapsed = now - self._last_request
             wait = max(0.0, self._delay - elapsed)
-            self._last_request = time.monotonic()
         if wait > 0:
             log.debug("AIMD controller waiting %.2fs", wait)
             await asyncio.sleep(wait)
+        async with self._lock:
+            self._last_request = time.monotonic()
 
     async def report_429(self) -> None:
         async with self._lock:

@@ -12,7 +12,7 @@ def redact_proxy(proxy_url: str) -> str:
     """
     parsed = urlparse(proxy_url)
     if not parsed.hostname:
-        return proxy_url
+        return "<redacted>"
     host_part = parsed.hostname
     if parsed.port:
         host_part = f"{host_part}:{parsed.port}"

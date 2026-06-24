@@ -37,6 +37,8 @@ class IdentityPool:
         self._evict_client: Callable[[str], Awaitable[None]] | None = None
 
         stored = json_load(BANNED_PROXIES_FILE, {})
+        if not isinstance(stored, dict):
+            stored = {}
         now = time.time()
         self._banned: dict[str, float] = {
             url: ts
@@ -151,6 +153,7 @@ class IdentityPool:
         expired_ban = [url for url, ts in self._banned.items() if now_ts - ts >= BAN_DURATION]
         for url in expired_ban:
             del self._banned[url]
+            self._perm_excluded.discard(url)
         if expired_ban:
             log.debug("Pruned %d expired bans", len(expired_ban))
 
@@ -160,8 +163,7 @@ class IdentityPool:
 
     async def _persist_banned(self) -> None:
         async with self._lock:
-            data = dict(self._banned)
-        json_atomic_save(data, BANNED_PROXIES_FILE)
+            json_atomic_save(dict(self._banned), BANNED_PROXIES_FILE)
 
     async def close(self) -> None:
         self._stop = True

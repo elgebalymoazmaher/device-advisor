@@ -53,13 +53,14 @@ async def crawl_specs() -> int:
 
     pool, client = await setup_pool()
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_SPECS)
+    retries_lock = asyncio.Lock()
 
     try:
 
         async def brand_worker(brand: str, brand_devices: list[dict[str, Any]]) -> None:
             async with semaphore:
                 for device in brand_devices:
-                    await _fetch_one(pool, client, device, retries)
+                    await _fetch_one(pool, client, device, retries, retries_lock)
 
         await asyncio.gather(
             *(brand_worker(b, d) for b, d in by_brand.items())
@@ -74,14 +75,16 @@ async def _fetch_one(
     client: ProxyAwareClient,
     device: dict[str, Any],
     retries: dict[str, int],
+    retries_lock: asyncio.Lock,
 ) -> None:
     slug = device["slug"]
     if is_done(slug):
         return
 
-    attempts = retries.get(slug, 0)
-    if attempts >= MAX_RETRIES_PER_ITEM:
-        return
+    async with retries_lock:
+        attempts = retries.get(slug, 0)
+        if attempts >= MAX_RETRIES_PER_ITEM:
+            return
 
     identity = await pool.acquire()
     if identity is None:
@@ -90,18 +93,20 @@ async def _fetch_one(
     url = device["url"]
     response = await client.fetch(identity, url)
     if response is None:
+        await handle_response(pool, identity, None, url)
         return
 
     ok = await handle_response(pool, identity, response, url)
     if not ok:
-        if response.status_code == 429:
+        async with retries_lock:
             _increment_retry(slug, attempts, retries)
         return
 
     parsed = parse_spec_page(response.text)
     if not parsed.get("name"):
         log.warning("No name found for %s; retrying later", slug)
-        _increment_retry(slug, attempts, retries)
+        async with retries_lock:
+            _increment_retry(slug, attempts, retries)
         return
 
     payload = {
@@ -112,8 +117,9 @@ async def _fetch_one(
     }
     json_atomic_save(payload, SPECS_CACHE_DIR / f"{slug}.json")
     log.info("Saved specs for %s (%s)", parsed["name"], slug)
-    retries.pop(slug, None)
-    save_retries(retries)
+    async with retries_lock:
+        retries.pop(slug, None)
+        save_retries(retries)
 
 
 def _increment_retry(slug: str, attempts: int, retries: dict[str, int]) -> None:

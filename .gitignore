@@ -8,6 +8,7 @@ venv/
 
 # Env vars (copy .env.example to .env, never commit the real one)
 .env
+.env.*
 
 # Scraped/working data — this is output, not source
 data/

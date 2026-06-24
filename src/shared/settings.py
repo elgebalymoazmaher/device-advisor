@@ -84,7 +84,15 @@ def _compute_worker_count() -> int:
         max(4, _total_ram_mb() // 50),
         50,
     )
-    return int(os.getenv("DEVICE_ADVISOR_WORKERS", str(base)))
+    raw = os.getenv("DEVICE_ADVISOR_WORKERS")
+    if raw is not None:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return base
 
 
 WORKER_COUNT = _compute_worker_count()
