@@ -15,6 +15,7 @@ from src.scraper.identity.models import Identity
 from src.scraper.identity.pool import IdentityPool
 from src.scraper.identity.proxy_source import ProxySource
 from src.scraper.net.client import ProxyAwareClient
+from src.scraper.net.throttle import Controller
 from src.shared.settings import DEFAULT_TIMEOUT
 
 log = logging.getLogger(__name__)
@@ -30,7 +31,8 @@ BLOCKED_KEYWORDS = [
 
 async def setup_pool() -> tuple[IdentityPool, ProxyAwareClient]:
     pool = IdentityPool()
-    client = ProxyAwareClient(timeout=DEFAULT_TIMEOUT)
+    controller = Controller()
+    client = ProxyAwareClient(controller=controller, timeout=DEFAULT_TIMEOUT)
     pool.set_client_evict(client.evict)
 
     source = await ProxySource.probe()

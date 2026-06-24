@@ -52,7 +52,7 @@ async def crawl_specs(pool: IdentityPool | None = None, client: ProxyAwareClient
         brand = d.get("brand", "Unknown")
         by_brand.setdefault(brand, []).append(d)
 
-    own_pool = pool is None
+    own_pool = pool is None or client is None
     if pool is None or client is None:
         pool, client = await setup_pool()
 

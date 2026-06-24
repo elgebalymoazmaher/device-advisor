@@ -40,6 +40,8 @@ async def crawl_brand(
 ) -> list[dict[str, Any]]:
     slug = brand["slug"]
     progress = checkpoint.get(slug)
+    if not isinstance(progress, dict):
+        progress = None
 
     # If device count on GSMArena differs from what we last saw, reset progress
     # so new or removed devices get picked up on re-run.
@@ -127,7 +129,7 @@ async def crawl_listings(pool: IdentityPool | None = None, client: ProxyAwareCli
     checkpoint = load_checkpoint()
     checkpoint_lock = asyncio.Lock()
 
-    own_pool = pool is None
+    own_pool = pool is None or client is None
     if pool is None or client is None:
         pool, client = await setup_pool()
 
