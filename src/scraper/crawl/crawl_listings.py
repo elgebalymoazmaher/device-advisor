@@ -47,8 +47,8 @@ async def crawl_brand(
     if not isinstance(progress, dict):
         progress = None
 
-    # If device count on GSMArena differs from what we last saw, reset progress
-    # so new or removed devices get picked up on re-run.
+    # Device count changed since last run -- reset progress so new or removed
+    # devices get picked up on re-run.
     if progress is not None:
         last_count = progress.get("last_device_count")
         current_count = brand.get("device_count", 0)
@@ -68,7 +68,7 @@ async def crawl_brand(
         devices = []
         url = brand["url"]
 
-    # Infer current page from the starting URL: "...-p3.php" → page 3, no match → page 1
+    # Infer page from the starting URL: "...-p3.php" => page 3, no match => page 1
     m = re.search(r'-p(\d+)\.php$', url)
     page = int(m.group(1)) if m else 1
     success = False
@@ -80,7 +80,7 @@ async def crawl_brand(
         next_url = None
         consecutive_empty = 0
 
-        for _ in range(999):
+        for _ in range(999):  # arbitrary retry ceiling -- broken out below
             identity = None
             for attempt in range(3):
                 identity = await pool.acquire()
@@ -161,7 +161,7 @@ async def crawl_listings(pool: IdentityPool | None = None, client: ProxyAwareCli
             total = sum(len(r) for r in results)
             log.info("Done: %d devices across %d brands", total, len(results))
             if total == 0:
-                log.error("No devices found across any brand — aborting spec crawl")
+                log.error("No devices found across any brand -- aborting spec crawl")
                 return 1
             return 0
         finally:

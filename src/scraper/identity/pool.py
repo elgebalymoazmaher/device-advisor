@@ -19,7 +19,7 @@ from src.shared.storage import json_atomic_save, json_load
 
 log = logging.getLogger(__name__)
 
-_EXCLUSION_TIMEOUT = 300.0
+_EXCLUSION_TIMEOUT = 300.0  # seconds before a temp-excluded proxy can be retried
 
 
 class IdentityPool:

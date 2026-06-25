@@ -1,7 +1,7 @@
 """Project-wide configuration: paths, timeouts, limits, and worker sizing.
 
 Every value here is either a hard-coded default or something read from an
-environment variable. Nothing in this module touches the network — it just
+environment variable. Nothing in this module touches the network -- it just
 describes how the app is configured to run.
 """
 

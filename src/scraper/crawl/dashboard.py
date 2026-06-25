@@ -14,6 +14,7 @@ are needed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import deque
@@ -71,11 +72,11 @@ class CrawlDashboard:
         self._title = title
         self._start = time.monotonic()
 
-        # Brand tracking: slug → "active" | "done" | "error"
+        # Brand tracking: slug => "active" | "done" | "error"
         self._brands: dict[str, str] = {}
         self._brand_info: dict[str, dict[str, Any]] = {}   # {name, page, devices}
 
-        # Device tracking: slug → "active" | "done" | "error"
+        # Device tracking: slug => "active" | "done" | "error"
         self._devices: dict[str, str] = {}
         self._device_info: dict[str, dict[str, Any]] = {}  # {name, brand}
 
@@ -97,10 +98,12 @@ class CrawlDashboard:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
+        exc_type = args[0] if args else None
         # One final paint before stopping so the last state is visible.
         self._live.update(self._build())
         self._live.stop()
-        self._print_summary()
+        if exc_type not in (KeyboardInterrupt, asyncio.CancelledError):
+            self._print_summary()
 
     # --- Brand callbacks ------------------------------------------------------
 
@@ -250,7 +253,7 @@ class CrawlDashboard:
                 right,
             )
         elif tot_b > 0:
-            # Listing phase — show accumulated device count rather than a bar
+            # Listing phase -- show accumulated device count rather than a bar
             found = sum(i.get("devices", 0) for i in self._brand_info.values())
             grid.add_row(
                 Text("  Devices", style="dim"),
@@ -316,7 +319,7 @@ class CrawlDashboard:
         now = time.monotonic()
 
         table = Table.grid(padding=(0, 2))
-        table.add_column(width=2)   # ✓ or ✗
+        table.add_column(width=2)   # check or cross
         table.add_column(width=28)  # name
         table.add_column()          # detail
         table.add_column(width=9, justify="right")  # age

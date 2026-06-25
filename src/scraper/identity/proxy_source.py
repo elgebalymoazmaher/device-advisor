@@ -119,6 +119,12 @@ class ProxySource(IdentitySource):
 
     @classmethod
     async def probe(cls, block: bool = True) -> "ProxySource":
+        """Start a proxy source -- optionally wait for initial warm-up.
+
+        When *block* is True the method returns only after the source has
+        finished its first fetch. When False the warm-up runs as a background
+        task so the caller can proceed immediately.
+        """
         source = cls()
         if block:
             await source._warm_pool()

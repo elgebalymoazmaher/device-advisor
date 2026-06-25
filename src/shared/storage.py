@@ -37,7 +37,7 @@ def json_atomic_save(data: Any, path: str | Path) -> None:
 def json_load(path: str | Path, default: Any) -> Any:
     """Load JSON from `path`.
 
-    Returns `default` if the file is missing or not valid JSON — never raises for those two cases.
+    Returns `default` if the file is missing or not valid JSON -- never raises for those two cases.
     """
     try:
         with Path(path).open(encoding="utf-8") as f:

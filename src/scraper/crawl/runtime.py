@@ -1,7 +1,7 @@
 """Shared setup/teardown for a crawl run, plus response gatekeeping.
 
 Every command uses this: either the response is good (release the identity),
-or it's not (permanently exclude the proxy — swap it for a fresh one).
+or it's not (permanently exclude the proxy -- swap it for a fresh one).
 """
 
 from __future__ import annotations

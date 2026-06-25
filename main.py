@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Entry point for device-advisor.
 
-Fetches brands, crawls listings, then crawls specs — all three steps, every time.
+Fetches brands, crawls listings, then crawls specs -- all three steps, every time.
 """
 
 from __future__ import annotations
