@@ -79,21 +79,16 @@ async def crawl_brand(
     while url:
         batch = None
         next_url = None
-        consecutive_empty = 0
 
-        for _ in range(999):  # arbitrary retry ceiling -- broken out below
+        for _ in range(20):  # total attempt budget per page (pool misses + bad responses)
             identity = None
             for _ in range(3):
                 identity = await pool.acquire()
                 if identity is not None:
-                    consecutive_empty = 0
                     break
                 await asyncio.sleep(2)
 
             if identity is None:
-                consecutive_empty += 1
-                if consecutive_empty >= 15:
-                    break
                 await asyncio.sleep(2)
                 continue
 
