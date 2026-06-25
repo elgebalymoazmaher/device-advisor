@@ -1,4 +1,8 @@
-"""The shape of a single network identity, plus the abstract interface every identity source (proxy lists, paid services, whatever comes later) has to implement."""
+"""The shape of a single network identity, plus the abstract interface.
+
+Every identity source (proxy lists, paid services, whatever comes later)
+has to implement this interface.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,7 @@
-"""Pulls free proxy lists from a handful of public sources, turns them into Identity objects, and can check that they actually work."""
+"""Pulls free proxy lists from a handful of public sources.
+
+Turns them into Identity objects, and can check that they actually work.
+"""
 
 from __future__ import annotations
 
@@ -55,23 +58,19 @@ class ProxySource(IdentitySource):
         self._ready = False
 
     async def build(self) -> Identity | None:
+        """Return one identity from the queue, or None if empty."""
         async with self._lock:
-            if not self._ready:
+            if not self._ready or not self._queue:
                 return None
-            if self._queue:
-                return self._queue.pop(random.randrange(len(self._queue)))
-
-        await self._append_fresh_candidates()
-        async with self._lock:
-            if self._queue:
-                return self._queue.pop(random.randrange(len(self._queue)))
-        return None
+            return self._queue.pop(random.randrange(len(self._queue)))
 
     async def health(self) -> bool:
+        """Whether the source has finished its initial warm-up."""
         async with self._lock:
             return self._ready
 
     async def fetch_candidates(self) -> list[Identity]:
+        """Fetch all candidates from upstream sources directly."""
         return await self._fetch_all()
 
     async def close(self) -> None:
@@ -119,9 +118,12 @@ class ProxySource(IdentitySource):
         return list(unique.values())
 
     @classmethod
-    async def probe(cls) -> "ProxySource":
+    async def probe(cls, block: bool = True) -> "ProxySource":
         source = cls()
-        await source._warm_pool()
+        if block:
+            await source._warm_pool()
+        else:
+            asyncio.create_task(source._warm_pool())
         return source
 
 
@@ -145,7 +147,12 @@ def _parse_source_payload(source_type: str, response: httpx.Response) -> list[Id
 
 
 async def validate_candidates(candidates: list[Identity]) -> list[Identity]:
-    """Probe each candidate against a random validation endpoint, keeping only the ones that respond successfully. Carried over from the original script as-is; nothing currently calls this, but it's here if you want a stricter, pre-validated pool later."""
+    """Probe each candidate against a random validation endpoint.
+
+    Keeps only the ones that respond successfully. Carried over from the
+    original script as-is; nothing currently calls this, but it's here if
+    you want a stricter, pre-validated pool later.
+    """
     sem = asyncio.Semaphore(50)
 
     async def validate_one(identity: Identity) -> Identity | None:
@@ -170,6 +177,7 @@ async def validate_candidates(candidates: list[Identity]) -> list[Identity]:
 
 
 def _parse_line_source(proto: str, line: str) -> Identity | None:
+    """Parse a ``ip:port`` line from a plain-text proxy list."""
     line = line.strip()
     if not line or not RE_PROXY_ENTRY.match(line):
         return None
@@ -179,6 +187,7 @@ def _parse_line_source(proto: str, line: str) -> Identity | None:
 
 
 def _parse_json_source(node: Any) -> Identity | None:
+    """Parse a single proxy entry from a JSON source."""
     if not isinstance(node, dict):
         return None
 
@@ -197,6 +206,7 @@ def _parse_json_source(node: Any) -> Identity | None:
 
 
 def _choose_protocol(protocols: Any) -> str | None:
+    """Pick the preferred protocol (socks5 > http) from a list or string."""
     if isinstance(protocols, list):
         normalized = {str(protocol).lower() for protocol in protocols}
         if "socks5" in normalized:

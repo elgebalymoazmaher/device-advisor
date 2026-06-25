@@ -1,4 +1,8 @@
-"""Turns one brand's device-listing page into DeviceListing rows, plus a regex pass that pulls a few quick specs straight out of each listing's title text."""
+"""Turns one brand's device-listing page into DeviceListing rows.
+
+Also includes a regex pass that pulls a few quick specs straight out of
+each listing's title text.
+"""
 
 from __future__ import annotations
 

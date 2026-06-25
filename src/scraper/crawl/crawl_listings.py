@@ -1,9 +1,14 @@
-"""Command: crawl every brand's device-listing pages, with checkpointing so an interrupted run can pick up where it left off."""
+"""Command: crawl every brand's device-listing pages.
+
+Includes checkpointing so an interrupted run can pick up where it left
+off.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from src.scraper.crawl.fetch_brands import load_brands
@@ -15,7 +20,6 @@ from src.scraper.parsing.listings import parse_brand_listing, parse_raw_specs
 from src.shared.settings import (
     CHECKPOINT_FILE,
     LISTINGS_CACHE_DIR,
-    WORKER_COUNT,
 )
 from src.shared.storage import json_atomic_save, json_load
 
@@ -64,36 +68,47 @@ async def crawl_brand(
         devices = []
         url = brand["url"]
 
-    page = 1
+    # Infer current page from the starting URL: "...-p3.php" → page 3, no match → page 1
+    m = re.search(r'-p(\d+)\.php$', url)
+    page = int(m.group(1)) if m else 1
     success = False
     if dashboard:
-        dashboard.on_brand_start(slug, brand["name"])
+        dashboard.on_brand_start(slug, brand["name"], brand.get("device_count", 0), page, len(devices))
 
     while url:
-        identity = None
-        for attempt in range(3):
-            identity = await pool.acquire()
-            if identity is not None:
-                break
-            if attempt == 0:
-                log.warning("No proxy available for %s (attempt %d/3); waiting...", slug, attempt + 1)
-            await asyncio.sleep(2)
+        batch = None
+        next_url = None
+        consecutive_empty = 0
 
-        if identity is None:
-            log.warning("Skipping %s: no proxy available after 3 attempts", slug)
-            if dashboard:
-                dashboard.on_brand_error(slug, "no proxy")
+        for _ in range(999):
+            identity = None
+            for attempt in range(3):
+                identity = await pool.acquire()
+                if identity is not None:
+                    consecutive_empty = 0
+                    break
+                await asyncio.sleep(2)
+
+            if identity is None:
+                consecutive_empty += 1
+                if consecutive_empty >= 15:
+                    break
+                await asyncio.sleep(2)
+                continue
+
+            response = await client.fetch(identity, url)
+            if not await handle_response(pool, identity, response, url):
+                continue
+
+            batch, next_url = parse_brand_listing(response.text)
             break
 
-        response = await client.fetch(identity, url)
-        ok = await handle_response(pool, identity, response, url)
-        if not ok:
-            log.warning("Skipping %s: request failed/blocked via proxy", slug)
+        if batch is None:
+            log.warning("Skipping %s: all proxies exhausted for page %d", slug, page)
             if dashboard:
                 dashboard.on_brand_error(slug, "fetch")
             break
 
-        batch, next_url = parse_brand_listing(response.text)
         for listing in batch:
             record = listing.to_dict()
             record["brand"] = brand["name"]
@@ -131,9 +146,9 @@ async def crawl_listings(pool: IdentityPool | None = None, client: ProxyAwareCli
 
     own_pool = pool is None or client is None
     if pool is None or client is None:
-        pool, client = await setup_pool()
+        pool, client = await setup_pool(target=len(brands))
 
-    semaphore = asyncio.Semaphore(WORKER_COUNT)
+    semaphore = asyncio.Semaphore(len(brands))
 
     async with CrawlDashboard("Crawling Brands") as dashboard:
         try:

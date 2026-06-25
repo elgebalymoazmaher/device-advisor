@@ -1,4 +1,9 @@
-"""Project-wide configuration: paths, timeouts, limits, and worker sizing. Every value here is either a hard-coded default or something read from an environment variable. Nothing in this module touches the network — it just describes how the app is configured to run."""
+"""Project-wide configuration: paths, timeouts, limits, and worker sizing.
+
+Every value here is either a hard-coded default or something read from an
+environment variable. Nothing in this module touches the network — it just
+describes how the app is configured to run.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +21,7 @@ CHECKPOINT_FILE = DATA_DIR / "checkpoint.json"
 LISTINGS_CACHE_DIR = DATA_DIR / "listings"
 SPECS_CACHE_DIR = DATA_DIR / "specs"
 RETRIES_FILE = SPECS_CACHE_DIR / "retries.json"
-BANNED_PROXIES_FILE = DATA_DIR / "banned_proxies.json"
+KNOWN_PROXIES_FILE = DATA_DIR / "known_proxies.json"
 
 # --- GSMArena scrape targets --------------------------------------------
 
@@ -36,7 +41,9 @@ STAGGER_MAX = 10.0  # carried over from the original script; not wired up yet
 
 # --- Worker sizing ---------------------------------------------------------
 #
-# How many concurrent workers (and, by extension, how many identities the pool should keep warm) is based on CPU count and free RAM, with an env override for when you just want to set a number yourself.
+# How many concurrent workers (and, by extension, how many identities the pool
+# should keep warm) is based on CPU count and free RAM, with an env override
+# for when you just want to set a number yourself.
 
 
 def _total_ram_mb() -> int:
@@ -79,6 +86,10 @@ def _total_ram_mb() -> int:
 
 
 def _compute_worker_count() -> int:
+    """Best-effort worker count based on CPU and RAM.
+
+    Falls back to 50 or an env override (DEVICE_ADVISOR_WORKERS).
+    """
     base = min(
         (os.cpu_count() or 4) * 8,
         max(4, _total_ram_mb() // 50),
