@@ -116,11 +116,14 @@ class IdentityPool:
         await self._save_known()
 
     async def record_good(self, proxy_url: str) -> None:
+        added = False
         async with self._lock:
             if proxy_url not in self._known:
                 self._known[proxy_url] = time.time()
                 self._known_identities.append(_known_identity(proxy_url))
-        await self._save_known()
+                added = True
+        if added:
+            await self._save_known()
 
     async def start_replenisher(self) -> None:
         if self._replenisher_task is None or self._replenisher_task.done():

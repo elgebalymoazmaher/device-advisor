@@ -104,7 +104,7 @@ async def _fetch_one(
 
     for _ in range(999):
         identity = None
-        for attempt in range(3):
+        for _ in range(3):
             identity = await pool.acquire()
             if identity is not None:
                 consecutive_empty = 0
@@ -129,7 +129,7 @@ async def _fetch_one(
 
         parsed = parse_spec_page(response.text)
         if not parsed.get("name"):
-            continue
+            break
 
         payload = {
             "slug": slug,

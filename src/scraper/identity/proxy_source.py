@@ -56,6 +56,7 @@ class ProxySource(IdentitySource):
         self._lock = asyncio.Lock()
         self._queue: list[Identity] = []
         self._ready = False
+        self._warm_task: asyncio.Task | None = None
 
     async def build(self) -> Identity | None:
         """Return one identity from the queue, or None if empty."""
@@ -129,7 +130,12 @@ class ProxySource(IdentitySource):
         if block:
             await source._warm_pool()
         else:
-            asyncio.create_task(source._warm_pool())
+            task = asyncio.create_task(source._warm_pool())
+            source._warm_task = task
+            task.add_done_callback(
+                lambda t: log.error("Proxy warm-up failed", exc_info=t.exception())
+                if t.exception() else None
+            )
         return source
 
 

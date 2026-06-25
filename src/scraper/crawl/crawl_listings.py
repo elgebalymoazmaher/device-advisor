@@ -20,6 +20,7 @@ from src.scraper.parsing.listings import parse_brand_listing, parse_raw_specs
 from src.shared.settings import (
     CHECKPOINT_FILE,
     LISTINGS_CACHE_DIR,
+    MAX_CONCURRENT_LISTINGS,
 )
 from src.shared.storage import json_atomic_save, json_load
 
@@ -82,7 +83,7 @@ async def crawl_brand(
 
         for _ in range(999):  # arbitrary retry ceiling -- broken out below
             identity = None
-            for attempt in range(3):
+            for _ in range(3):
                 identity = await pool.acquire()
                 if identity is not None:
                     consecutive_empty = 0
@@ -146,9 +147,9 @@ async def crawl_listings(pool: IdentityPool | None = None, client: ProxyAwareCli
 
     own_pool = pool is None or client is None
     if pool is None or client is None:
-        pool, client = await setup_pool(target=len(brands))
+        pool, client = await setup_pool(target=MAX_CONCURRENT_LISTINGS)
 
-    semaphore = asyncio.Semaphore(len(brands))
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_LISTINGS)
 
     async with CrawlDashboard("Crawling Brands") as dashboard:
         try:

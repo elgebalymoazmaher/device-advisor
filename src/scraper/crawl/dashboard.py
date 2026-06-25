@@ -190,7 +190,7 @@ class CrawlDashboard:
         elapsed = _fmt_runtime(time.monotonic() - self._start)
 
         left = Text(no_wrap=True)
-        left.append(" device-advisor ", style="bold white")
+        left.append(" Device Advisor ", style="bold white")
         left.append("/", style="dim")
         left.append(f" {self._title} ", style="bold #4FC3F7")
 
@@ -290,13 +290,15 @@ class CrawlDashboard:
             name = info.get("name", slug)[:24]
             if is_dev:
                 detail = Text(info.get("brand", ""), style="dim")
+                dot_style = "bright_green"
             else:
                 page    = info.get("page", 1)
                 devices = info.get("devices", 0)
                 detail  = Text(f"page {page}  ·  {devices} devices", style="dim")
+                dot_style = "bright_yellow" if page <= 1 and devices == 0 else "bright_green"
 
             table.add_row(
-                Text("●", style="bright_green"),
+                Text("●", style=dot_style),
                 Text(name, style="bold white"),
                 detail,
             )
