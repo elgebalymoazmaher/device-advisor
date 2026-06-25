@@ -1,4 +1,8 @@
-"""Keeps a working set of identities ready to use: pulls from sources, excludes the ones that fail, and refills itself in the background."""
+"""Keeps a working set of identities ready to use.
+
+Pulls from sources, excludes the ones that fail, and refills itself in
+the background.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +13,13 @@ import time
 from collections.abc import Awaitable, Callable
 
 from src.scraper.identity.models import Identity, IdentitySource
-from src.scraper.net.throttle import Controller
 from src.shared.redact import redact_proxy
-from src.shared.settings import BAN_DURATION, BANNED_PROXIES_FILE, WORKER_COUNT
+from src.shared.settings import KNOWN_PROXIES_FILE, WORKER_COUNT
 from src.shared.storage import json_atomic_save, json_load
 
 log = logging.getLogger(__name__)
 
-_EXCLUSION_TIMEOUT = 300.0
+_EXCLUSION_TIMEOUT = 300.0  # seconds before a temp-excluded proxy can be retried
 
 
 class IdentityPool:
@@ -29,30 +32,26 @@ class IdentityPool:
         self._pool: list[Identity] = []
         self._excluded: dict[str, float] = {}
         self._perm_excluded: set[str] = set()
+        self._known: dict[str, float] = {}
+        self._known_identities: list[Identity] = []
         self._lock = asyncio.Lock()
         self._target = target or WORKER_COUNT
-        self._controller = Controller()
         self._stop = False
         self._replenisher_task: asyncio.Task | None = None
         self._evict_client: Callable[[str], Awaitable[None]] | None = None
 
-        stored = json_load(BANNED_PROXIES_FILE, {})
+        stored = json_load(KNOWN_PROXIES_FILE, {})
         if not isinstance(stored, dict):
             stored = {}
-        now = time.time()
-        self._banned: dict[str, float] = {
-            url: ts
-            for url, ts in stored.items()
-            if now - ts < BAN_DURATION
-        }
-        if self._banned:
+        self._known = stored
+        self._known_identities = [
+            _known_identity(url)
+            for url in stored
+        ]
+        if self._known:
             log.info(
-                "Loaded %d persistent bans from %s", len(self._banned), BANNED_PROXIES_FILE
+                "Loaded %d known-good proxies from %s", len(self._known), KNOWN_PROXIES_FILE
             )
-
-    @property
-    def controller(self) -> Controller:
-        return self._controller
 
     @property
     async def pool_size(self) -> int:
@@ -66,6 +65,9 @@ class IdentityPool:
         self._evict_client = evict_fn
 
     async def pre_warm(self) -> None:
+        async with self._lock:
+            self._pool.extend(self._known_identities)
+            self._known_identities.clear()
         while len(self._pool) < self._target:
             identity = await self._build_one()
             if identity is None:
@@ -79,6 +81,13 @@ class IdentityPool:
             if self._pool:
                 idx = random.randrange(len(self._pool))
                 return self._pool.pop(idx)
+            while self._known_identities:
+                identity = self._known_identities.pop()
+                if (
+                    identity.proxy_url not in self._excluded
+                    and identity.proxy_url not in self._perm_excluded
+                ):
+                    return identity
         return await self._build_one()
 
     async def release(self, identity: Identity) -> None:
@@ -101,10 +110,20 @@ class IdentityPool:
         async with self._lock:
             self._perm_excluded.add(proxy_url)
             self._excluded.pop(proxy_url, None)
-            self._banned[proxy_url] = time.time()
+            self._known.pop(proxy_url, None)
         log.debug("Permanently excluded identity %s", redact_proxy(proxy_url))
         await self._evict(proxy_url)
-        await self._persist_banned()
+        await self._save_known()
+
+    async def record_good(self, proxy_url: str) -> None:
+        added = False
+        async with self._lock:
+            if proxy_url not in self._known:
+                self._known[proxy_url] = time.time()
+                self._known_identities.append(_known_identity(proxy_url))
+                added = True
+        if added:
+            await self._save_known()
 
     async def start_replenisher(self) -> None:
         if self._replenisher_task is None or self._replenisher_task.done():
@@ -136,7 +155,6 @@ class IdentityPool:
                 identity is not None
                 and identity.proxy_url not in self._excluded
                 and identity.proxy_url not in self._perm_excluded
-                and identity.proxy_url not in self._banned
             ):
                 return identity
         return None
@@ -149,21 +167,13 @@ class IdentityPool:
         if expired:
             log.debug("Pruned %d expired exclusions", len(expired))
 
-        now_ts = time.time()
-        expired_ban = [url for url, ts in self._banned.items() if now_ts - ts >= BAN_DURATION]
-        for url in expired_ban:
-            del self._banned[url]
-            self._perm_excluded.discard(url)
-        if expired_ban:
-            log.debug("Pruned %d expired bans", len(expired_ban))
-
     async def _evict(self, proxy_url: str) -> None:
         if self._evict_client is not None:
             await self._evict_client(proxy_url)
 
-    async def _persist_banned(self) -> None:
+    async def _save_known(self) -> None:
         async with self._lock:
-            json_atomic_save(dict(self._banned), BANNED_PROXIES_FILE)
+            json_atomic_save(dict(self._known), KNOWN_PROXIES_FILE)
 
     async def close(self) -> None:
         self._stop = True
@@ -177,3 +187,8 @@ class IdentityPool:
 
         for source in self._sources:
             await source.close()
+
+
+def _known_identity(proxy_url: str) -> Identity:
+    proto = proxy_url.split("://")[0]
+    return Identity(source="known", proxy_url=proxy_url, proxy_type=proto)

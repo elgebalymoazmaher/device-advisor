@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,11 @@ log = logging.getLogger(__name__)
 
 
 def json_atomic_save(data: Any, path: str | Path) -> None:
-    """Write `data` to `path` as JSON, atomically. Writes to a temp file first, then renames it over the destination. A crash mid-write can never leave a half-written file behind."""
+    """Write `data` to `path` as JSON, atomically.
+
+    Writes to a temp file first, then renames it over the destination.
+    A crash mid-write can never leave a half-written file behind.
+    """
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp = destination.with_name(f"{destination.name}.tmp.{uuid.uuid4().hex}")
@@ -32,7 +37,7 @@ def json_atomic_save(data: Any, path: str | Path) -> None:
 def json_load(path: str | Path, default: Any) -> Any:
     """Load JSON from `path`.
 
-    Returns `default` if the file is missing or not valid JSON — never raises for those two cases.
+    Returns `default` if the file is missing or not valid JSON -- never raises for those two cases.
     """
     try:
         with Path(path).open(encoding="utf-8") as f:

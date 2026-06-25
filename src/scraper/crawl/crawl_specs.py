@@ -1,4 +1,8 @@
-"""Command: crawl individual device spec pages, with a retry counter per device so permanently-broken pages don't get retried forever."""
+"""Command: crawl individual device spec pages.
+
+Includes a retry counter per device so permanently-broken pages don't
+get retried forever.
+"""
 
 from __future__ import annotations
 
@@ -93,57 +97,59 @@ async def _fetch_one(
         if attempts >= MAX_RETRIES_PER_ITEM:
             return
 
-    identity = None
-    for attempt in range(3):
-        identity = await pool.acquire()
-        if identity is not None:
-            break
-        if attempt == 0:
-            log.warning("No proxy available for %s (attempt %d/3); waiting...", slug, attempt + 1)
-        await asyncio.sleep(2)
-
-    if identity is None:
-        log.warning("Skipping %s: no proxy available after 3 attempts", slug)
-        if dashboard:
-            dashboard.on_device_error(slug, attempts)
-        return
-
     name = device.get("raw_specs", {}).get("name") or slug
-    if dashboard:
-        dashboard.on_device_start(slug, name, device.get("brand", ""))
-
     url = device["url"]
-    response = await client.fetch(identity, url)
-    ok = await handle_response(pool, identity, response, url)
-    if not ok:
+    started = False
+    consecutive_empty = 0
+
+    for _ in range(999):
+        identity = None
+        for _ in range(3):
+            identity = await pool.acquire()
+            if identity is not None:
+                consecutive_empty = 0
+                break
+            await asyncio.sleep(2)
+
+        if identity is None:
+            consecutive_empty += 1
+            if consecutive_empty >= 15:
+                break
+            await asyncio.sleep(2)
+            continue
+
+        if not started:
+            started = True
+            if dashboard:
+                dashboard.on_device_start(slug, name, device.get("brand", ""))
+
+        response = await client.fetch(identity, url)
+        if not await handle_response(pool, identity, response, url):
+            continue
+
+        parsed = parse_spec_page(response.text)
+        if not parsed.get("name"):
+            break
+
+        payload = {
+            "slug": slug,
+            "brand": device.get("brand"),
+            "url": url,
+            **parsed,
+        }
+        json_atomic_save(payload, SPECS_CACHE_DIR / f"{slug}.json")
+        log.info("Saved specs for %s (%s)", parsed["name"], slug)
         async with retries_lock:
-            _increment_retry(slug, attempts, retries)
+            retries.pop(slug, None)
+            save_retries(retries)
         if dashboard:
-            dashboard.on_device_error(slug, attempts + 1)
+            dashboard.on_device_done(slug)
         return
 
-    parsed = parse_spec_page(response.text)
-    if not parsed.get("name"):
-        log.warning("No name found for %s; retrying later", slug)
-        async with retries_lock:
-            _increment_retry(slug, attempts, retries)
-        if dashboard:
-            dashboard.on_device_error(slug, attempts + 1)
-        return
-
-    payload = {
-        "slug": slug,
-        "brand": device.get("brand"),
-        "url": url,
-        **parsed,
-    }
-    json_atomic_save(payload, SPECS_CACHE_DIR / f"{slug}.json")
-    log.info("Saved specs for %s (%s)", parsed["name"], slug)
     async with retries_lock:
-        retries.pop(slug, None)
-        save_retries(retries)
+        _increment_retry(slug, attempts, retries)
     if dashboard:
-        dashboard.on_device_done(slug)
+        dashboard.on_device_error(slug, attempts + 1)
 
 
 def _increment_retry(slug: str, attempts: int, retries: dict[str, int]) -> None:

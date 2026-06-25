@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Entry point for device-advisor. Fetches brands, crawls listings, then crawls specs — all three steps, every time."""
+"""Entry point for device-advisor.
+
+Fetches brands, crawls listings, then crawls specs -- all three steps, every time.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.scraper.crawl.crawl_listings import crawl_listings
 from src.scraper.crawl.crawl_specs import crawl_specs
-from src.scraper.crawl.fetch_brands import fetch_brands
+from src.scraper.crawl.fetch_brands import fetch_brands, load_brands
 from src.scraper.crawl.runtime import setup_pool, teardown_pool
 from src.shared.logging_setup import setup_logging
 
@@ -29,7 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parsed = build_parser().parse_args(argv)
     setup_logging("DEBUG" if parsed.verbose else "INFO")
-    return asyncio.run(run_all())
+    try:
+        return asyncio.run(run_all())
+    except KeyboardInterrupt:
+        return 1
 
 
 async def run_all() -> int:
@@ -37,14 +43,12 @@ async def run_all() -> int:
     if code != 0:
         return code
 
-    pool, client = await setup_pool()
+    brands = load_brands()
+    pool, client = await setup_pool(target=len(brands))
     try:
         code = await crawl_listings(pool, client)
         if code != 0:
             return code
-
-        log.info("Waiting for proxy pool to replenish before crawling specs...")
-        await asyncio.sleep(5)
 
         return await crawl_specs(pool, client)
     finally:

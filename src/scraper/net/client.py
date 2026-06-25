@@ -1,4 +1,4 @@
-"""HTTP client that only ever speaks through a proxy, and reports each outcome back to the throttle controller so the whole crawler can react together."""
+"""HTTP client that only ever speaks through a proxy."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import logging
 import httpx
 
 from src.scraper.identity.models import Identity
-from src.scraper.net.throttle import Controller
 from src.scraper.net.user_agents import random_user_agent
 from src.shared.redact import redact_proxy
 
@@ -16,8 +15,7 @@ log = logging.getLogger(__name__)
 
 
 class ProxyAwareClient:
-    def __init__(self, controller: Controller, timeout: float = 30.0) -> None:
-        self._controller = controller
+    def __init__(self, timeout: float = 30.0) -> None:
         self._timeout = timeout
         self._clients: dict[str, httpx.AsyncClient] = {}
         self._client_locks: dict[str, asyncio.Lock] = {}
@@ -65,8 +63,6 @@ class ProxyAwareClient:
             )
             return None
 
-        await self._controller.acquire()
-
         try:
             response = await client.get(url, **kwargs)
         except httpx.TimeoutException:
@@ -77,12 +73,9 @@ class ProxyAwareClient:
             return None
 
         if response.status_code == 429:
-            await self._controller.report_429()
             log.warning("429 via %s for %s", redact_proxy(proxy_url), url)
         elif response.is_error:
             log.debug("HTTP %d via %s for %s", response.status_code, redact_proxy(proxy_url), url)
-        else:
-            await self._controller.report_success()
 
         return response
 
