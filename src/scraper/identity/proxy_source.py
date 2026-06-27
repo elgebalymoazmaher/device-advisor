@@ -21,7 +21,10 @@ _VALID_PROXY_TYPES = {"http", "socks5"}
 
 SOURCES = [
     ("http", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"),
-    ("socks5", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"),
+    (
+        "socks5",
+        "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
+    ),
     (
         "http",
         "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all",
@@ -30,7 +33,10 @@ SOURCES = [
         "socks5",
         "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks5&timeout=10000&country=all",
     ),
-    ("json", "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.json"),
+    (
+        "json",
+        "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.json",
+    ),
     (
         "json",
         "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc",
@@ -108,7 +114,7 @@ class ProxySource(IdentitySource):
                     if response.status_code != 200:
                         continue
                     candidates.extend(_parse_source_payload(source_type, response))
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 -- one bad source must not abort the rest
                     log.debug("Proxy source fetch failed: %s; %s", url, exc)
 
         unique: dict[str, Identity] = {}
@@ -119,7 +125,7 @@ class ProxySource(IdentitySource):
         return list(unique.values())
 
     @classmethod
-    async def probe(cls, block: bool = True) -> "ProxySource":
+    async def probe(cls, block: bool = True) -> ProxySource:
         """Start a proxy source -- optionally wait for initial warm-up.
 
         When *block* is True the method returns only after the source has
@@ -133,8 +139,11 @@ class ProxySource(IdentitySource):
             task = asyncio.create_task(source._warm_pool())
             source._warm_task = task
             task.add_done_callback(
-                lambda t: log.error("Proxy warm-up failed", exc_info=t.exception())
-                if t.exception() else None
+                lambda t: (
+                    log.error("Proxy warm-up failed", exc_info=t.exception())
+                    if t.exception()
+                    else None
+                )
             )
         return source
 
@@ -146,7 +155,11 @@ def _parse_source_payload(source_type: str, response: httpx.Response) -> list[Id
             data = data.get("data", data.get("proxies", []))
         if not isinstance(data, list):
             return []
-        return [identity for node in data if (identity := _parse_json_source(node)) is not None]
+        return [
+            identity
+            for node in data
+            if (identity := _parse_json_source(node)) is not None
+        ]
 
     if source_type not in _VALID_PROXY_TYPES:
         return []
@@ -182,7 +195,9 @@ async def validate_candidates(candidates: list[Identity]) -> list[Identity]:
                 pass
         return None
 
-    results = await asyncio.gather(*(validate_one(candidate) for candidate in candidates))
+    results = await asyncio.gather(
+        *(validate_one(candidate) for candidate in candidates)
+    )
     validated = [result for result in results if result is not None]
     log.debug("Validated %d/%d proxies", len(validated), len(candidates))
     return validated
@@ -214,18 +229,21 @@ def _parse_json_source(node: Any) -> Identity | None:
     if proto is None:
         return None
 
-    return Identity(source="proxy", proxy_url=f"{proto}://{ip}:{port}", proxy_type=proto)
+    return Identity(
+        source="proxy", proxy_url=f"{proto}://{ip}:{port}", proxy_type=proto
+    )
 
 
 def _choose_protocol(protocols: Any) -> str | None:
-    """Pick the preferred protocol (socks5 > http) from a list or string."""
-    if isinstance(protocols, list):
-        normalized = {str(protocol).lower() for protocol in protocols}
-        if "socks5" in normalized:
-            return "socks5"
-        if "http" in normalized:
-            return "http"
-        return None
+    """Pick the preferred protocol (socks5 > http) from a list, set, or string."""
+    if isinstance(protocols, str):
+        protocols = protocols.split(",")
+    elif not isinstance(protocols, (list, tuple, set)):
+        protocols = [protocols]
 
-    proto = str(protocols).split(",")[0].strip().lower()
-    return proto if proto in _VALID_PROXY_TYPES else None
+    normalized = {str(protocol).strip().lower() for protocol in protocols}
+    if "socks5" in normalized:
+        return "socks5"
+    if "http" in normalized:
+        return "http"
+    return None

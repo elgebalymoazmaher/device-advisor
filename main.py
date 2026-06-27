@@ -25,7 +25,9 @@ log = logging.getLogger(__name__)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="device-advisor")
-    parser.add_argument("-v", "--verbose", action="store_true", help="enable debug logging")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="enable debug logging"
+    )
     return parser
 
 

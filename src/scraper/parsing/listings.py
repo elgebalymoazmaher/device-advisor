@@ -2,6 +2,10 @@
 
 Also includes a regex pass that pulls a few quick specs straight out of
 each listing's title text.
+
+Note: see the docstring in parsing/specs.py for why mypy's union-attr
+complaints about `.get("href", ...)` / `.get("title", ...)` here are stub
+noise (these attributes are never multi-valued in practice), not real bugs.
 """
 
 from __future__ import annotations

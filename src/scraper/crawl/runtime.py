@@ -11,10 +11,6 @@ import re
 
 import httpx
 
-# GSMArena phone URLs follow the pattern: model_name-12345.php (4+ digit ID).
-# Non-phone links (brand index, pagination) have shorter or no numeric IDs.
-_RE_PHONE_LINK = re.compile(r'href="[^"]+-\d{4,}\.php')
-
 from src.scraper.identity.models import Identity
 from src.scraper.identity.pool import IdentityPool
 from src.scraper.identity.proxy_source import ProxySource
@@ -22,6 +18,22 @@ from src.scraper.net.client import ProxyAwareClient
 from src.shared.settings import DEFAULT_TIMEOUT
 
 log = logging.getLogger(__name__)
+
+# GSMArena phone URLs follow the pattern: model_name-12345.php (4+ digit ID).
+# Non-phone links (brand index, pagination) have shorter or no numeric IDs.
+_RE_PHONE_LINK = re.compile(r'href="[^"]+-\d{4,}\.php')
+
+
+def backoff_timer(*, initial: float = 0.25, maximum: float = 2.0, factor: float = 2.0):
+    """Yield sleep durations with exponential backoff, capped at *maximum*.
+
+    Each call creates an independent timer.  Reset by assigning a new one.
+    """
+    delay = initial
+    while True:
+        yield delay
+        delay = min(delay * factor, maximum)
+
 
 BLOCKED_KEYWORDS = [
     "Just a moment...",
@@ -32,7 +44,9 @@ BLOCKED_KEYWORDS = [
 ]
 
 
-async def setup_pool(target: int | None = None) -> tuple[IdentityPool, ProxyAwareClient]:
+async def setup_pool(
+    target: int | None = None,
+) -> tuple[IdentityPool, ProxyAwareClient]:
     pool = IdentityPool(target=target)
     client = ProxyAwareClient(timeout=DEFAULT_TIMEOUT)
     pool.set_client_evict(client.evict)
@@ -72,3 +86,16 @@ async def handle_response(
 
 def is_valid_content(text: str) -> bool:
     return not any(keyword in text for keyword in BLOCKED_KEYWORDS)
+
+
+def classify_failure(response: httpx.Response | None) -> str:
+    """Map a failed fetch to a short label for the dashboard's phase display.
+
+    Used right after `handle_response` returns False, when the caller needs
+    to know *why* so it can show something more useful than just "failed".
+    """
+    if response is None:
+        return "proxy_fail"
+    if response.status_code == 429:
+        return "rate_limited"
+    return "blocked"
