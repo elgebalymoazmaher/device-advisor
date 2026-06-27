@@ -86,4 +86,5 @@ def test_data_dir_respects_env_override(monkeypatch, tmp_path) -> None:
         assert tmp_path / "brands.json" == settings.BRANDS_FILE
         assert tmp_path / "specs" / "retries.json" == settings.RETRIES_FILE
     finally:
+        monkeypatch.delenv("DATA_DIR", raising=False)
         importlib.reload(settings)  # restore real module state for later tests

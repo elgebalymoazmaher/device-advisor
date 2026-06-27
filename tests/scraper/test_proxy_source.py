@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -280,5 +282,33 @@ async def test_proxy_source_one_bad_source_does_not_abort_others(monkeypatch) ->
 
 async def test_proxy_source_empty_pool_before_warmup() -> None:
     source = ProxySource()
+    assert await source.health() is False
+    assert await source.build() is None
+
+
+async def test_proxy_source_non_blocking_probe_cancelled_on_early_close(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        proxy_source,
+        "SOURCES",
+        [("http", "https://example.test/slow.txt")],
+    )
+
+    async def _slow_handler(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(3600)
+        return httpx.Response(200, text="1.2.3.4:8080\n")
+
+    _install_fake_transport(monkeypatch, _slow_handler)
+
+    source = await ProxySource.probe(block=False)
+    warm_task = source._warm_task
+    assert warm_task is not None
+    assert not warm_task.done()
+
+    await source.close()
+
+    assert warm_task.cancelled()
+    assert source._warm_task is None
     assert await source.health() is False
     assert await source.build() is None

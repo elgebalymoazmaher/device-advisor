@@ -6,6 +6,7 @@ Turns them into Identity objects, and can check that they actually work.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 import re
@@ -81,6 +82,11 @@ class ProxySource(IdentitySource):
         return await self._fetch_all()
 
     async def close(self) -> None:
+        if self._warm_task is not None:
+            self._warm_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._warm_task
+            self._warm_task = None
         async with self._lock:
             self._ready = False
             self._queue.clear()
@@ -141,7 +147,7 @@ class ProxySource(IdentitySource):
             task.add_done_callback(
                 lambda t: (
                     log.error("Proxy warm-up failed", exc_info=t.exception())
-                    if t.exception()
+                    if not t.cancelled() and t.exception()
                     else None
                 )
             )

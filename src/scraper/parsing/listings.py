@@ -93,10 +93,9 @@ def _parse_listing_item(li: Tag) -> DeviceListing | None:
 
     strong = anchor.find("strong")
     if strong:
-        span = strong.find("span")
-        name = (span or strong).get_text(strip=True)
+        name = strong.get_text(" ", strip=True)
     else:
-        name = anchor.get_text(strip=True)
+        name = anchor.get_text(" ", strip=True)
 
     return DeviceListing(
         name=name,

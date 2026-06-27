@@ -81,8 +81,8 @@ def _total_ram_mb() -> int:
 
             memory = MemoryStatusEx()
             memory.dwLength = ctypes.sizeof(MemoryStatusEx)
-            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory))  # type: ignore[attr-defined]
-            return memory.ullTotalPhys // (1024 * 1024)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):  # type: ignore[attr-defined]
+                return memory.ullTotalPhys // (1024 * 1024)
     except Exception:  # noqa: BLE001 -- ctypes/Windows API failures vary too much to enumerate
         pass
 

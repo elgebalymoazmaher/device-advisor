@@ -99,6 +99,13 @@ def _resolve_brand_start(
         return _BrandStart(
             devices=devices, page=_infer_page_number(brand["url"]), url=None
         )
+    # Only honour next_url when the cache was loaded successfully.  If the
+    # cached listing payload is missing or corrupt (empty list), fall back
+    # to the brand start URL so we don't skip pages on a re-run.
+    if not devices:
+        return _BrandStart(
+            devices=[], page=_infer_page_number(brand["url"]), url=brand["url"]
+        )
     return _BrandStart(devices=devices, page=_infer_page_number(next_url), url=next_url)
 
 

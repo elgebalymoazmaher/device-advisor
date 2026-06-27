@@ -82,6 +82,15 @@ def test_brand_name_multi_word_brand() -> None:
     assert _brand_name(anchor) == "Sony Ericsson"
 
 
+def test_brand_name_wrapped_in_another_element_falls_back_to_label_replace(
+) -> None:
+    """Exercises the fallback in _brand_name where brand text is nested inside
+    another element (no direct NavigableString children), so the branch that
+    uses anchor.get_text() minus the span text is taken."""
+    anchor = _anchor('<a href="x.php"><b>Acer</b><span> 117 devices</span></a>')
+    assert _brand_name(anchor) == "Acer"
+
+
 def test_brand_name_no_span_falls_back_to_full_text() -> None:
     anchor = _anchor('<a href="x.php">JustABrand</a>')
     assert _brand_name(anchor) == "JustABrand"

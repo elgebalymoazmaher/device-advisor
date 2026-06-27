@@ -153,9 +153,17 @@ async def crawl_specs(
         brand = device.get("brand", "Unknown")
         by_brand.setdefault(brand, []).append(device)
 
-    own_pool = pool is None or client is None
-    if pool is None or client is None:
+    if pool is None and client is None:
         pool, client = await setup_pool()
+        own_pool = True
+    elif pool is None:
+        pool, _ = await setup_pool()
+        own_pool = True
+    elif client is None:
+        _, client = await setup_pool()
+        own_pool = True
+    else:
+        own_pool = False
 
     semaphore = asyncio.Semaphore(WORKER_COUNT)
 
@@ -213,9 +221,10 @@ async def _fetch_one(
     if attempts >= MAX_RETRIES_PER_ITEM:
         return
 
-    name = device.get("raw_specs", {}).get("name") or slug
+    name = device["name"]
     url = device["url"]
-    started = False
+    if dashboard:
+        dashboard.on_device_start(slug, name, device.get("brand", ""))
     counters = _AttemptCounters()
     backoff = backoff_timer()
 
@@ -232,10 +241,6 @@ async def _fetch_one(
 
         counters.note_acquired()
         backoff = backoff_timer()
-        if not started:
-            started = True
-            if dashboard:
-                dashboard.on_device_start(slug, name, device.get("brand", ""))
 
         if dashboard:
             dashboard.on_device_phase(slug, "requesting")

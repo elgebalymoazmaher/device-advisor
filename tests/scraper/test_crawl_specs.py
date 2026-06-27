@@ -165,7 +165,12 @@ async def test_fetch_one_gives_up_after_max_consecutive_failures(monkeypatch) ->
 
     tracker = RetryTracker({})
     client = _CountingClient()
-    device = {"slug": "phone-1", "url": "https://x.test/phone-1.php", "brand": "Acme"}
+    device = {
+        "name": "Phone 1",
+        "slug": "phone-1",
+        "url": "https://x.test/phone-1.php",
+        "brand": "Acme",
+    }
 
     await _fetch_one(_AlwaysAvailablePool(), client, device, tracker)
 
@@ -183,7 +188,12 @@ async def test_fetch_one_gives_up_after_max_consecutive_empty(monkeypatch) -> No
 
     tracker = RetryTracker({})
     client = _CountingClient()
-    device = {"slug": "phone-1", "url": "https://x.test/phone-1.php", "brand": "Acme"}
+    device = {
+        "name": "Phone 1",
+        "slug": "phone-1",
+        "url": "https://x.test/phone-1.php",
+        "brand": "Acme",
+    }
 
     await _fetch_one(_NeverAvailablePool(), client, device, tracker)
 
@@ -195,7 +205,12 @@ async def test_fetch_one_gives_up_after_max_consecutive_empty(monkeypatch) -> No
 async def test_fetch_one_skips_already_done_device() -> None:
     json_atomic_save({"name": "X"}, crawl_specs_module.SPECS_CACHE_DIR / "phone-1.json")
     client = _CountingClient()
-    device = {"slug": "phone-1", "url": "https://x.test/phone-1.php", "brand": "Acme"}
+    device = {
+        "name": "Phone 1",
+        "slug": "phone-1",
+        "url": "https://x.test/phone-1.php",
+        "brand": "Acme",
+    }
 
     await _fetch_one(_AlwaysAvailablePool(), client, device, RetryTracker({}))
     assert client.calls == 0
@@ -204,7 +219,12 @@ async def test_fetch_one_skips_already_done_device() -> None:
 async def test_fetch_one_skips_device_already_at_retry_cap() -> None:
     client = _CountingClient()
     tracker = RetryTracker({"phone-1": crawl_specs_module.MAX_RETRIES_PER_ITEM})
-    device = {"slug": "phone-1", "url": "https://x.test/phone-1.php", "brand": "Acme"}
+    device = {
+        "name": "Phone 1",
+        "slug": "phone-1",
+        "url": "https://x.test/phone-1.php",
+        "brand": "Acme",
+    }
 
     await _fetch_one(_AlwaysAvailablePool(), client, device, tracker)
     assert client.calls == 0
@@ -218,7 +238,12 @@ async def test_fetch_one_success_saves_spec_and_clears_retry(monkeypatch) -> Non
 
     tracker = RetryTracker({"phone-1": 2})
     client = _CountingClient()
-    device = {"slug": "phone-1", "url": "https://x.test/phone-1.php", "brand": "Acme"}
+    device = {
+        "name": "Phone 1",
+        "slug": "phone-1",
+        "url": "https://x.test/phone-1.php",
+        "brand": "Acme",
+    }
 
     await _fetch_one(_AlwaysAvailablePool(), client, device, tracker)
 
@@ -242,7 +267,12 @@ async def test_fetch_one_gives_up_when_parsed_page_has_no_name(monkeypatch) -> N
 
     tracker = RetryTracker({})
     client = _CountingClient()
-    device = {"slug": "phone-1", "url": "https://x.test/phone-1.php", "brand": "Acme"}
+    device = {
+        "name": "Phone 1",
+        "slug": "phone-1",
+        "url": "https://x.test/phone-1.php",
+        "brand": "Acme",
+    }
 
     await _fetch_one(_AlwaysAvailablePool(), client, device, tracker)
 
@@ -264,7 +294,14 @@ async def test_crawl_specs_returns_0_when_everything_already_done(monkeypatch) -
     monkeypatch.setattr(
         crawl_specs_module,
         "load_listings",
-        lambda: [{"slug": "phone-1", "url": "https://x/phone-1.php", "brand": "Acme"}],
+        lambda: [
+            {
+                "name": "Phone 1",
+                "slug": "phone-1",
+                "url": "https://x/phone-1.php",
+                "brand": "Acme",
+            }
+        ],
     )
     assert await crawl_specs() == 0
 
@@ -284,7 +321,14 @@ async def test_crawl_specs_flushes_retries_for_a_single_failing_device(
     monkeypatch.setattr(
         crawl_specs_module,
         "load_listings",
-        lambda: [{"slug": "phone-1", "url": "https://x/phone-1.php", "brand": "Acme"}],
+        lambda: [
+            {
+                "name": "Phone 1",
+                "slug": "phone-1",
+                "url": "https://x/phone-1.php",
+                "brand": "Acme",
+            }
+        ],
     )
 
     pool = _AlwaysAvailablePool()

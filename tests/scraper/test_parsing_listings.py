@@ -44,11 +44,7 @@ def test_parse_brand_listing_extracts_devices() -> None:
     assert s24.url == "https://www.gsmarena.com/samsung_galaxy_s24-12773.php"
     assert s24.image_url == "//example.com/s24.jpg"
     assert "Android 14" in s24.raw_title
-    # Current (preserved) behaviour: when <strong> has a nested <span>, the
-    # span's text wins over the strong's own text -- here that's "5G" rather
-    # than "Galaxy S24". Documented here so a future change to real-world
-    # markup handling shows up as a deliberate, visible diff.
-    assert s24.name == "5G"
+    assert s24.name == "Galaxy S24 5G"
 
     nokia = devices[1]
     assert nokia.name == "Nokia 3310"
