@@ -1,11 +1,21 @@
-"""Turns one phone's spec page into name + brief + detailed spec tables."""
+"""Turns one phone's spec page into name + brief + detailed spec tables.
+
+Note: mypy's bs4 stubs type every `Tag.get(...)` call as
+`str | AttributeValueList | None` (AttributeValueList is what bs4 returns
+for inherently multi-valued attributes like `class`). `data-spec` is never
+multi-valued in practice, so the runtime value here is always a plain str
+or None -- the union-attr errors mypy reports for it are stub noise, not
+real bugs.
+"""
 
 from __future__ import annotations
+
+from typing import Any
 
 from bs4 import BeautifulSoup, Tag
 
 
-def parse_spec_page(html: str) -> dict:
+def parse_spec_page(html: str) -> dict[str, Any]:
     soup = BeautifulSoup(html, "html.parser")
     return {
         "name": _extract_name(soup),
@@ -25,7 +35,9 @@ def _extract_brief(soup: BeautifulSoup) -> dict[str, str]:
     if not summary:
         return brief
 
-    for element in summary.find_all(lambda tag: tag.get("data-spec", "").endswith("-hl")):
+    for element in summary.find_all(
+        lambda tag: tag.get("data-spec", "").endswith("-hl")
+    ):
         key = element["data-spec"].removesuffix("-hl")
         brief[key] = element.get_text(" ", strip=True)
 

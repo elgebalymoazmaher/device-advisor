@@ -1,4 +1,9 @@
-"""Turns the GSMArena maker/brand index page into a list of brand rows."""
+"""Turns the GSMArena maker/brand index page into a list of brand rows.
+
+Note: see the docstring in parsing/specs.py for why mypy's union-attr
+complaints about `.get("href", ...)` here are stub noise (href is never a
+multi-valued attribute in practice), not real bugs.
+"""
 
 from __future__ import annotations
 

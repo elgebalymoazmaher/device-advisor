@@ -33,10 +33,22 @@ BRANDS_URL = "https://www.gsmarena.com/makers.php3"
 DEFAULT_TIMEOUT = 15.0
 MAX_RETRIES_PER_ITEM = 5
 MAX_CONCURRENT_LISTINGS = 10
+
+# The four constants below are carried over from an earlier version of the
+# script and aren't read anywhere in the current codebase. Kept rather than
+# deleted so a future change can wire them in deliberately instead of
+# reinventing the names:
+#   - MAX_CONCURRENT_SPECS: crawl_specs currently sizes its semaphore off
+#     WORKER_COUNT instead.
+#   - MAX_PAGES_PER_BRAND: brand-listing pagination has no hard cap; it
+#     stops once GSMArena stops returning a "next" link.
+#   - BAN_DURATION: proxy exclusion currently uses the unrelated, much
+#     shorter _EXCLUSION_TIMEOUT constant in identity/pool.py.
+#   - STAGGER_MAX: no request-staggering is implemented yet.
 MAX_CONCURRENT_SPECS = 10
 MAX_PAGES_PER_BRAND = 50
 BAN_DURATION = 48 * 3600  # 48 hours before a banned proxy can be retried
-STAGGER_MAX = 10.0  # carried over from the original script; not wired up yet
+STAGGER_MAX = 10.0
 
 
 # --- Worker sizing ---------------------------------------------------------
@@ -69,17 +81,17 @@ def _total_ram_mb() -> int:
 
             memory = MemoryStatusEx()
             memory.dwLength = ctypes.sizeof(MemoryStatusEx)
-            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory))
-            return memory.ullTotalPhys // (1024 * 1024)
-    except Exception:
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):  # type: ignore[attr-defined]
+                return memory.ullTotalPhys // (1024 * 1024)
+    except Exception:  # noqa: BLE001 -- ctypes/Windows API failures vary too much to enumerate
         pass
 
     try:
-        with open("/proc/meminfo", encoding="utf-8") as f:
+        with Path("/proc/meminfo").open(encoding="utf-8") as f:
             for line in f:
                 if line.startswith("MemTotal:"):
                     return int(line.split()[1]) // 1024
-    except Exception:
+    except (OSError, ValueError, IndexError):
         pass
 
     return 4096

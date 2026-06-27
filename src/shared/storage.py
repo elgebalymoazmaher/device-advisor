@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
-import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -25,19 +25,18 @@ def json_atomic_save(data: Any, path: str | Path) -> None:
     try:
         with tmp.open("w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, destination)
+        tmp.replace(destination)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             tmp.unlink()
-        except OSError:
-            pass
         raise
 
 
 def json_load(path: str | Path, default: Any) -> Any:
     """Load JSON from `path`.
 
-    Returns `default` if the file is missing or not valid JSON -- never raises for those two cases.
+    Returns `default` if the file is missing or not valid JSON -- never
+    raises for those two cases.
     """
     try:
         with Path(path).open(encoding="utf-8") as f:

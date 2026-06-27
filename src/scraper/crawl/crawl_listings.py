@@ -9,14 +9,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
+from src.scraper.crawl.dashboard import CrawlDashboard
 from src.scraper.crawl.fetch_brands import load_brands
-from src.scraper.crawl.runtime import handle_response, setup_pool, teardown_pool
+from src.scraper.crawl.runtime import (
+    backoff_timer,
+    classify_failure,
+    handle_response,
+    setup_pool,
+    teardown_pool,
+)
 from src.scraper.identity.pool import IdentityPool
 from src.scraper.net.client import ProxyAwareClient
-from src.scraper.crawl.dashboard import CrawlDashboard
-from src.scraper.parsing.listings import parse_brand_listing, parse_raw_specs
+from src.scraper.parsing.listings import (
+    DeviceListing,
+    parse_brand_listing,
+    parse_raw_specs,
+)
 from src.shared.settings import (
     CHECKPOINT_FILE,
     LISTINGS_CACHE_DIR,
@@ -25,6 +36,12 @@ from src.shared.settings import (
 from src.shared.storage import json_atomic_save, json_load
 
 log = logging.getLogger(__name__)
+
+# How many times to retry a single listing page (across identities) before
+# giving up on the rest of that brand.
+_MAX_PAGE_ATTEMPTS = 20
+
+_RE_PAGE_NUMBER = re.compile(r"-p(\d+)\.php$")
 
 
 def load_checkpoint() -> dict[str, dict[str, Any]]:
@@ -35,14 +52,25 @@ def save_checkpoint(data: dict[str, dict[str, Any]]) -> None:
     json_atomic_save(data, CHECKPOINT_FILE)
 
 
-async def crawl_brand(
-    pool: IdentityPool,
-    client: ProxyAwareClient,
-    brand: dict[str, Any],
-    checkpoint: dict[str, dict[str, Any]],
-    checkpoint_lock: asyncio.Lock,
-    dashboard: CrawlDashboard | None = None,
-) -> list[dict[str, Any]]:
+@dataclass
+class _BrandStart:
+    """Where to resume a brand's listing crawl from."""
+
+    devices: list[dict[str, Any]]
+    page: int
+    url: str | None  # None means the brand was already fully crawled.
+
+
+def _infer_page_number(url: str) -> int:
+    """Infer the listing page number from a URL like '...-p3.php' (default 1)."""
+    match = _RE_PAGE_NUMBER.search(url)
+    return int(match.group(1)) if match else 1
+
+
+def _resolve_brand_start(
+    brand: dict[str, Any], checkpoint: dict[str, dict[str, Any]]
+) -> _BrandStart:
+    """Figure out where to resume a brand's listing crawl from its checkpoint."""
     slug = brand["slug"]
     progress = checkpoint.get(slug)
     if not isinstance(progress, dict):
@@ -56,60 +84,113 @@ async def crawl_brand(
         if last_count is not None and last_count != current_count:
             log.info(
                 "Device count for %s changed (%d -> %d); re-crawling",
-                slug, last_count, current_count,
+                slug,
+                last_count,
+                current_count,
             )
             progress = None
 
-    if progress is not None:
-        if progress.get("next_url") is None:
-            return json_load(LISTINGS_CACHE_DIR / f"{slug}.json", [])
-        devices = json_load(LISTINGS_CACHE_DIR / f"{slug}.json", [])
-        url = progress["next_url"]
-    else:
-        devices = []
-        url = brand["url"]
+    if progress is None:
+        return _BrandStart(devices=[], page=1, url=brand["url"])
 
-    # Infer page from the starting URL: "...-p3.php" => page 3, no match => page 1
-    m = re.search(r'-p(\d+)\.php$', url)
-    page = int(m.group(1)) if m else 1
-    success = False
+    devices = json_load(LISTINGS_CACHE_DIR / f"{slug}.json", [])
+    next_url = progress.get("next_url")
+    if next_url is None:
+        return _BrandStart(
+            devices=devices, page=_infer_page_number(brand["url"]), url=None
+        )
+    # Only honour next_url when the cache was loaded successfully.  If the
+    # cached listing payload is missing or corrupt (empty list), fall back
+    # to the brand start URL so we don't skip pages on a re-run.
+    if not devices:
+        return _BrandStart(
+            devices=[], page=_infer_page_number(brand["url"]), url=brand["url"]
+        )
+    return _BrandStart(devices=devices, page=_infer_page_number(next_url), url=next_url)
+
+
+def _listing_to_record(listing: DeviceListing, brand_name: str) -> dict[str, Any]:
+    """Merge a parsed listing with its brand and quick specs into one record."""
+    record: dict[str, Any] = dict(listing.to_dict())
+    record["brand"] = brand_name
+    record["raw_specs"] = parse_raw_specs(listing.raw_title)
+    return record
+
+
+async def _fetch_listing_page(
+    pool: IdentityPool,
+    client: ProxyAwareClient,
+    url: str,
+    slug: str,
+    dashboard: CrawlDashboard | None,
+) -> tuple[list[DeviceListing], str | None] | None:
+    """Fetch and parse one brand-listing page, retrying through the pool.
+
+    Returns None if every attempt failed.
+    """
+    backoff = backoff_timer()
+
+    for _ in range(_MAX_PAGE_ATTEMPTS):
+        identity = await pool.acquire()
+        if identity is None:
+            if dashboard:
+                dashboard.on_brand_phase(slug, "waiting")
+            await asyncio.sleep(next(backoff))
+            continue
+
+        backoff = backoff_timer()
+        response = await client.fetch(identity, url)
+        if not await handle_response(pool, identity, response, url):
+            if dashboard:
+                dashboard.on_brand_phase(slug, classify_failure(response))
+            continue
+
+        assert response is not None  # guaranteed by handle_response() returning True
+        if dashboard:
+            dashboard.on_brand_phase(slug, "parsing")
+        batch, next_url = parse_brand_listing(response.text)
+        if dashboard:
+            dashboard.on_brand_phase(slug, "requesting")
+        return batch, next_url
+
+    return None
+
+
+async def crawl_brand(
+    pool: IdentityPool,
+    client: ProxyAwareClient,
+    brand: dict[str, Any],
+    checkpoint: dict[str, dict[str, Any]],
+    checkpoint_lock: asyncio.Lock,
+    dashboard: CrawlDashboard | None = None,
+) -> list[dict[str, Any]]:
+    slug = brand["slug"]
+    start = _resolve_brand_start(brand, checkpoint)
+    devices, page, url = start.devices, start.page, start.url
+
     if dashboard:
-        dashboard.on_brand_start(slug, brand["name"], brand.get("device_count", 0), page, len(devices))
+        dashboard.on_brand_start(
+            slug, brand["name"], brand.get("device_count", 0), page, len(devices)
+        )
 
+    if url is None:
+        # Already fully crawled in a previous run -- nothing left to fetch.
+        if dashboard:
+            dashboard.on_brand_done(slug)
+        return devices
+
+    success = False
     while url:
-        batch = None
-        next_url = None
-
-        for _ in range(20):  # total attempt budget per page (pool misses + bad responses)
-            identity = None
-            for _ in range(3):
-                identity = await pool.acquire()
-                if identity is not None:
-                    break
-                await asyncio.sleep(2)
-
-            if identity is None:
-                await asyncio.sleep(2)
-                continue
-
-            response = await client.fetch(identity, url)
-            if not await handle_response(pool, identity, response, url):
-                continue
-
-            batch, next_url = parse_brand_listing(response.text)
-            break
-
-        if batch is None:
+        fetched = await _fetch_listing_page(pool, client, url, slug, dashboard)
+        if fetched is None:
             log.warning("Skipping %s: all proxies exhausted for page %d", slug, page)
             if dashboard:
                 dashboard.on_brand_error(slug, "fetch")
+            success = False
             break
 
-        for listing in batch:
-            record = listing.to_dict()
-            record["brand"] = brand["name"]
-            record["raw_specs"] = parse_raw_specs(listing.raw_title)
-            devices.append(record)
+        batch, next_url = fetched
+        devices.extend(_listing_to_record(listing, brand["name"]) for listing in batch)
 
         success = True
         log.info("Brand %s page %d: %d devices", slug, page, len(batch))
@@ -132,7 +213,9 @@ async def crawl_brand(
     return devices
 
 
-async def crawl_listings(pool: IdentityPool | None = None, client: ProxyAwareClient | None = None) -> int:
+async def crawl_listings(
+    pool: IdentityPool | None = None, client: ProxyAwareClient | None = None
+) -> int:
     brands = load_brands()
     if not brands:
         return 1
@@ -151,7 +234,14 @@ async def crawl_listings(pool: IdentityPool | None = None, client: ProxyAwareCli
 
             async def worker(brand: dict[str, Any]) -> list[dict[str, Any]]:
                 async with semaphore:
-                    return await crawl_brand(pool, client, brand, checkpoint, checkpoint_lock, dashboard=dashboard)
+                    return await crawl_brand(
+                        pool,
+                        client,
+                        brand,
+                        checkpoint,
+                        checkpoint_lock,
+                        dashboard=dashboard,
+                    )
 
             results = await asyncio.gather(*(worker(b) for b in brands))
             total = sum(len(r) for r in results)

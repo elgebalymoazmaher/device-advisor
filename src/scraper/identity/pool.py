@@ -7,6 +7,7 @@ the background.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 import time
@@ -35,7 +36,7 @@ class IdentityPool:
         self._known: dict[str, float] = {}
         self._known_identities: list[Identity] = []
         self._lock = asyncio.Lock()
-        self._target = target or WORKER_COUNT
+        self._target = target if target is not None else WORKER_COUNT
         self._stop = False
         self._replenisher_task: asyncio.Task | None = None
         self._evict_client: Callable[[str], Awaitable[None]] | None = None
@@ -44,13 +45,12 @@ class IdentityPool:
         if not isinstance(stored, dict):
             stored = {}
         self._known = stored
-        self._known_identities = [
-            _known_identity(url)
-            for url in stored
-        ]
+        self._known_identities = [_known_identity(url) for url in stored]
         if self._known:
             log.info(
-                "Loaded %d known-good proxies from %s", len(self._known), KNOWN_PROXIES_FILE
+                "Loaded %d known-good proxies from %s",
+                len(self._known),
+                KNOWN_PROXIES_FILE,
             )
 
     @property
@@ -78,9 +78,14 @@ class IdentityPool:
 
     async def acquire(self) -> Identity | None:
         async with self._lock:
-            if self._pool:
+            while self._pool:
                 idx = random.randrange(len(self._pool))
-                return self._pool.pop(idx)
+                identity = self._pool.pop(idx)
+                if (
+                    identity.proxy_url not in self._excluded
+                    and identity.proxy_url not in self._perm_excluded
+                ):
+                    return identity
             while self._known_identities:
                 identity = self._known_identities.pop()
                 if (
@@ -161,7 +166,9 @@ class IdentityPool:
 
     def _prune_exclusions(self) -> None:
         now = time.monotonic()
-        expired = [url for url, t in self._excluded.items() if now - t >= _EXCLUSION_TIMEOUT]
+        expired = [
+            url for url, t in self._excluded.items() if now - t >= _EXCLUSION_TIMEOUT
+        ]
         for url in expired:
             del self._excluded[url]
         if expired:
@@ -179,10 +186,8 @@ class IdentityPool:
         self._stop = True
         if self._replenisher_task is not None:
             self._replenisher_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._replenisher_task
-            except asyncio.CancelledError:
-                pass
             self._replenisher_task = None
 
         for source in self._sources:
@@ -190,5 +195,5 @@ class IdentityPool:
 
 
 def _known_identity(proxy_url: str) -> Identity:
-    proto = proxy_url.split("://")[0]
+    proto = proxy_url.split("://", 1)[0]
     return Identity(source="known", proxy_url=proxy_url, proxy_type=proto)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 import httpx
 
@@ -21,6 +22,16 @@ class ProxyAwareClient:
         self._client_locks: dict[str, asyncio.Lock] = {}
 
     async def _get_client(self, proxy_url: str, timeout: float) -> httpx.AsyncClient:
+        """Return the cached client for `proxy_url`, creating one if needed.
+
+        Note: `timeout` only takes effect the *first* time a given proxy_url
+        is seen -- the client (and the timeout it was built with) is then
+        cached and reused for that proxy's lifetime. A later call passing a
+        different timeout for an already-cached proxy_url is silently
+        ignored. Nothing in this codebase currently relies on per-call
+        timeouts, so this hasn't mattered in practice, but it's worth
+        knowing if you add a caller that does.
+        """
         client = self._clients.get(proxy_url)
         if client is not None:
             return client
@@ -28,7 +39,9 @@ class ProxyAwareClient:
         async with lock:
             client = self._clients.get(proxy_url)
             if client is None:
-                client = httpx.AsyncClient(proxy=proxy_url, timeout=httpx.Timeout(timeout))
+                client = httpx.AsyncClient(
+                    proxy=proxy_url, timeout=httpx.Timeout(timeout)
+                )
                 self._clients[proxy_url] = client
         return client
 
@@ -38,7 +51,9 @@ class ProxyAwareClient:
         if client is not None:
             await client.aclose()
 
-    async def fetch(self, identity: Identity, url: str, **kwargs) -> httpx.Response | None:
+    async def fetch(
+        self, identity: Identity, url: str, **kwargs: Any
+    ) -> httpx.Response | None:
         proxy_url = identity.proxy_url
         timeout = self._timeout if "timeout" not in kwargs else kwargs.pop("timeout")
 
@@ -68,14 +83,21 @@ class ProxyAwareClient:
         except httpx.TimeoutException:
             log.debug("Request timed out via %s for %s", redact_proxy(proxy_url), url)
             return None
-        except Exception as exc:
-            log.debug("Request failed via %s for %s: %s", redact_proxy(proxy_url), url, exc)
+        except Exception as exc:  # noqa: BLE001 -- any transport failure means "try another identity"
+            log.debug(
+                "Request failed via %s for %s: %s", redact_proxy(proxy_url), url, exc
+            )
             return None
 
         if response.status_code == 429:
             log.warning("429 via %s for %s", redact_proxy(proxy_url), url)
         elif response.is_error:
-            log.debug("HTTP %d via %s for %s", response.status_code, redact_proxy(proxy_url), url)
+            log.debug(
+                "HTTP %d via %s for %s",
+                response.status_code,
+                redact_proxy(proxy_url),
+                url,
+            )
 
         return response
 

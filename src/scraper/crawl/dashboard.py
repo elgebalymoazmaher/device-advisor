@@ -31,11 +31,22 @@ from src.shared.console import console
 
 log = logging.getLogger(__name__)
 
-_BAR_WIDTH   = 30   # characters wide for progress bars
-_MAX_EVENTS  = 10   # rolling window for the recent-events feed
+_BAR_WIDTH = 30  # characters wide for progress bars
+_MAX_EVENTS = 10  # rolling window for the recent-events feed
+
+# Phase → dot colour for the active-brands panel
+_PHASE_STYLES: dict[str, str] = {
+    "waiting": "dim white",
+    "requesting": "bright_blue",
+    "parsing": "bright_cyan",
+    "rate_limited": "bright_red",
+    "blocked": "bright_magenta",
+    "proxy_fail": "bright_yellow",
+}
 
 
 # --- Small helpers ------------------------------------------------------------
+
 
 def _fmt_runtime(seconds: float) -> str:
     """MM:SS wall-clock elapsed."""
@@ -54,7 +65,9 @@ def _fmt_age(seconds: float) -> str:
     return f"{seconds / 3600:.1f}h ago"
 
 
-def _bar(current: int, total: int, width: int = _BAR_WIDTH, *, style: str = "#4FC3F7") -> Text:
+def _bar(
+    current: int, total: int, width: int = _BAR_WIDTH, *, style: str = "#4FC3F7"
+) -> Text:
     """Render a filled block-character progress bar."""
     filled = min(int(width * current / total), width) if total > 0 else 0
     t = Text()
@@ -65,6 +78,7 @@ def _bar(current: int, total: int, width: int = _BAR_WIDTH, *, style: str = "#4F
 
 # --- Dashboard ----------------------------------------------------------------
 
+
 class CrawlDashboard:
     """Rich-powered live dashboard for crawl progress."""
 
@@ -74,11 +88,13 @@ class CrawlDashboard:
 
         # Brand tracking: slug => "active" | "done" | "error"
         self._brands: dict[str, str] = {}
-        self._brand_info: dict[str, dict[str, Any]] = {}   # {name, page, devices}
+        self._brand_info: dict[str, dict[str, Any]] = {}  # {name, page, devices}
+        self._brand_phase: dict[str, str] = {}  # slug => current operational phase
 
         # Device tracking: slug => "active" | "done" | "error"
         self._devices: dict[str, str] = {}
         self._device_info: dict[str, dict[str, Any]] = {}  # {name, brand}
+        self._device_phase: dict[str, str] = {}  # slug => current operational phase
 
         # Rolling feed: (timestamp, "done"|"error", display_name, detail_text)
         self._events: deque[tuple[float, str, str, str]] = deque(maxlen=_MAX_EVENTS)
@@ -107,11 +123,23 @@ class CrawlDashboard:
 
     # --- Brand callbacks ------------------------------------------------------
 
-    def on_brand_start(self, slug: str, name: str, total: int = 0, page: int = 1, devices: int = 0) -> None:
+    def on_brand_start(
+        self, slug: str, name: str, total: int = 0, page: int = 1, devices: int = 0
+    ) -> None:
         """Register a brand as actively being crawled."""
         self._brands[slug] = "active"
-        self._brand_info[slug] = {"name": name, "page": page, "devices": devices, "total": total}
+        self._brand_info[slug] = {
+            "name": name,
+            "page": page,
+            "devices": devices,
+            "total": total,
+        }
         self._live.update(self._build())
+
+    def on_brand_phase(self, slug: str, phase: str) -> None:
+        """Update the operational phase for an active brand."""
+        self._brand_phase[slug] = phase
+        self._live.update(self._build(), refresh=True)
 
     def on_brand_progress(
         self,
@@ -137,8 +165,8 @@ class CrawlDashboard:
     def on_brand_done(self, slug: str) -> None:
         """Mark a brand as completed."""
         self._brands[slug] = "done"
-        info    = self._brand_info.get(slug, {})
-        name    = info.get("name", slug)
+        info = self._brand_info.get(slug, {})
+        name = info.get("name", slug)
         devices = info.get("devices", 0)
         self._events.appendleft((time.monotonic(), "done", name, f"{devices} devices"))
         self._live.update(self._build())
@@ -154,8 +182,8 @@ class CrawlDashboard:
     def on_device_error(self, slug: str, attempts: int) -> None:
         """Mark a device spec fetch as failed."""
         self._devices[slug] = "error"
-        info  = self._device_info.get(slug, {})
-        name  = info.get("name", slug)
+        info = self._device_info.get(slug, {})
+        name = info.get("name", slug)
         brand = info.get("brand", "")
         label = f"{brand}  ·  attempt {attempts}" if brand else f"attempt {attempts}"
         self._events.appendleft((time.monotonic(), "error", name, label))
@@ -164,11 +192,16 @@ class CrawlDashboard:
     def on_device_done(self, slug: str) -> None:
         """Mark a device spec fetch as completed."""
         self._devices[slug] = "done"
-        info  = self._device_info.get(slug, {})
-        name  = info.get("name", slug)
+        info = self._device_info.get(slug, {})
+        name = info.get("name", slug)
         brand = info.get("brand", "")
         self._events.appendleft((time.monotonic(), "done", name, brand))
         self._live.update(self._build())
+
+    def on_device_phase(self, slug: str, phase: str) -> None:
+        """Update the operational phase for an active device."""
+        self._device_phase[slug] = phase
+        self._live.update(self._build(), refresh=True)
 
     # --- Rendering ------------------------------------------------------------
 
@@ -212,15 +245,18 @@ class CrawlDashboard:
     # --- Section: progress stats ----------------------------------------------
 
     def _r_stats(self) -> Panel:
-        done_b = sum(1 for v in self._brands.values()  if v == "done")
-        err_b  = sum(1 for v in self._brands.values()  if v == "error")
-        act_b  = sum(1 for v in self._brands.values()  if v == "active")
-        tot_b  = len(self._brands)
+        _brands = dict(self._brands)
+        _devices = dict(self._devices)
+        _brand_info = dict(self._brand_info)
+        done_b = sum(1 for v in _brands.values() if v == "done")
+        err_b = sum(1 for v in _brands.values() if v == "error")
+        act_b = sum(1 for v in _brands.values() if v == "active")
+        tot_b = len(_brands)
 
-        done_d = sum(1 for v in self._devices.values() if v == "done")
-        err_d  = sum(1 for v in self._devices.values() if v == "error")
-        act_d  = sum(1 for v in self._devices.values() if v == "active")
-        tot_d  = len(self._devices)
+        done_d = sum(1 for v in _devices.values() if v == "done")
+        err_d = sum(1 for v in _devices.values() if v == "error")
+        act_d = sum(1 for v in _devices.values() if v == "active")
+        tot_d = len(_devices)
 
         grid = Table.grid(padding=(0, 2), expand=True)
         grid.add_column(width=10)
@@ -254,7 +290,7 @@ class CrawlDashboard:
             )
         elif tot_b > 0:
             # Listing phase -- show accumulated device count rather than a bar
-            found = sum(i.get("devices", 0) for i in self._brand_info.values())
+            found = sum(i.get("devices", 0) for i in _brand_info.values())
             grid.add_row(
                 Text("  Devices", style="dim"),
                 Text("  accumulating…", style="dim italic"),
@@ -266,36 +302,44 @@ class CrawlDashboard:
     # --- Section: active items ------------------------------------------------
 
     def _r_active(self) -> Panel | None:
-        active_brands  = [
-            (s, i) for s, i in self._brand_info.items()
-            if self._brands.get(s) == "active"
+        _brand_info = dict(self._brand_info)
+        _brands = dict(self._brands)
+        _brand_phase = dict(self._brand_phase)
+        _device_info = dict(self._device_info)
+        _devices = dict(self._devices)
+        _device_phase = dict(self._device_phase)
+
+        brand_items = [
+            (s, i) for s, i in _brand_info.items() if _brands.get(s) == "active"
         ]
-        active_devices = [
-            (s, i) for s, i in self._device_info.items()
-            if self._devices.get(s) == "active"
+        device_items = [
+            (s, i) for s, i in _device_info.items() if _devices.get(s) == "active"
         ]
-        items  = active_brands or active_devices
+        items = brand_items or device_items
         if not items:
             return None
 
-        is_dev = bool(active_devices)
+        is_dev = bool(device_items)
         items.sort(key=lambda x: x[0].lower())
 
         table = Table.grid(padding=(0, 2))
-        table.add_column(width=2)   # status dot
-        table.add_column(width=26)  # item name
-        table.add_column()          # detail
+        table.add_column(width=2)
+        table.add_column(width=26)
+        table.add_column()
 
         for slug, info in items:
             name = info.get("name", slug)[:24]
             if is_dev:
-                detail = Text(info.get("brand", ""), style="dim")
-                dot_style = "bright_green"
+                phase = _device_phase.get(slug, "waiting")
+                dot_style = _PHASE_STYLES.get(phase, "dim")
+                detail = Text(f"{info.get('brand', '')}  ·  {phase}", style="dim")
             else:
-                page    = info.get("page", 1)
-                devices = info.get("devices", 0)
-                detail  = Text(f"page {page}  ·  {devices} devices", style="dim")
-                dot_style = "bright_yellow" if page <= 1 and devices == 0 else "bright_green"
+                phase = _brand_phase.get(slug, "waiting")
+                dot_style = _PHASE_STYLES.get(phase, "dim")
+                detail = Text(
+                    f"page {info.get('page', 1)}  ·  {info.get('devices', 0)} devices",
+                    style="dim",
+                )
 
             table.add_row(
                 Text("●", style=dot_style),
@@ -304,9 +348,23 @@ class CrawlDashboard:
             )
 
         label = "Devices" if is_dev else "Brands"
+
+        if is_dev:
+            content: Any = table
+        else:
+            legend = Text()
+            legend.append("○ waiting", style="dim white")
+            legend.append("  ● data ok", style="bright_blue")
+            legend.append("  ● extracting", style="bright_cyan")
+            legend.append("  ● rate limit", style="bright_red")
+            legend.append("  ● blocked", style="bright_magenta")
+            legend.append("  ● proxy error", style="bright_yellow")
+
+            content = Group(table, Text(""), legend)
+
         return Panel(
-            table,
-            title=f"[dim] Active {label} ({len(items)}) [/dim]",
+            content,
+            title=f"[dim] {label} [/dim]",
             title_align="left",
             border_style="dim #1d4e8f",
             box=box.SIMPLE_HEAD,
@@ -316,25 +374,26 @@ class CrawlDashboard:
     # --- Section: recent events -----------------------------------------------
 
     def _r_events(self) -> Panel | None:
-        if not self._events:
+        _events = list(self._events)
+        if not _events:
             return None
         now = time.monotonic()
 
         table = Table.grid(padding=(0, 2))
-        table.add_column(width=2)   # check or cross
+        table.add_column(width=2)  # check or cross
         table.add_column(width=28)  # name
-        table.add_column()          # detail
+        table.add_column()  # detail
         table.add_column(width=9, justify="right")  # age
 
-        for ts, kind, name, detail in self._events:
+        for ts, kind, name, detail in _events:
             if kind == "done":
                 icon = Text("✓", style="bright_green")
-                ns   = "white"
-                ds   = "dim"
+                ns = "white"
+                ds = "dim"
             else:
                 icon = Text("✗", style="bright_red")
-                ns   = "red"
-                ds   = "dim red"
+                ns = "red"
+                ds = "dim red"
 
             table.add_row(
                 icon,
@@ -356,10 +415,12 @@ class CrawlDashboard:
 
     def _print_summary(self) -> None:
         elapsed = _fmt_runtime(time.monotonic() - self._start)
-        done_b  = sum(1 for v in self._brands.values()  if v == "done")
-        err_b   = sum(1 for v in self._brands.values()  if v == "error")
-        done_d  = sum(1 for v in self._devices.values() if v == "done")
-        err_d   = sum(1 for v in self._devices.values() if v == "error")
+        _brands = dict(self._brands)
+        _devices = dict(self._devices)
+        done_b = sum(1 for v in _brands.values() if v == "done")
+        err_b = sum(1 for v in _brands.values() if v == "error")
+        done_d = sum(1 for v in _devices.values() if v == "done")
+        err_d = sum(1 for v in _devices.values() if v == "error")
 
         msg = Text()
         msg.append("  ✓  ", style="bold bright_green")
